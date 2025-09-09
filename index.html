@@ -1,61 +1,427 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TafelCapture – Android 15</title>
   <style>
-    body { font-family: sans-serif; background: #222; color: #fff; text-align: center; }
-    video { width: 100%; max-width: 480px; margin-top: 20px; background: #000; }
-    #error { color: #ff5555; margin-top: 20px; }
+    :root{
+      --bg:#0b0e13;--panel:#121826;--border:#223;--text:#e8eef7;
+      --ok:#34d399;--warn:#ffb020;--err:#ff6b6b;--btn:#2563eb;--btnDis:#334155;
+    }
+    *{box-sizing:border-box}
+    body{margin:16px;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    h1{margin:.2rem 0 1rem}
+    .grid{display:grid;grid-template-columns:1fr;gap:16px}
+    @media(min-width:900px){.grid{grid-template-columns:1.2fr .8fr}}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    button{padding:10px 14px;border:0;border-radius:10px;background:var(--btn);color:#fff;cursor:pointer}
+    button:disabled{background:var(--btnDis);cursor:not-allowed}
+    input[type="checkbox"]{width:18px;height:18px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;align-items:baseline}
+    .kv div{white-space:nowrap}
+    .tag{display:inline-block;padding:.2rem .5rem;border:1px solid var(--border);border-radius:999px;background:#0f1420}
+    video,canvas{width:100%;height:auto;background:#000;border-radius:10px}
+    small{opacity:.8}
   </style>
 </head>
 <body>
-  <video id="video" autoplay playsinline style="width:100%;max-width:480px;margin-top:20px;background:#000;"></video>
-  <div id="error" style="color:#ff5555;margin-top:20px;"></div>
+  <h1>📋 TafelCapture – Android 15</h1>
 
-  <h1>TafelCapture – Android 15</h1>
-  <h3>Aufnahme & Ordner</h3>
-  <p>
-    Kamera starten 🔦 Taschenlampe 📸 Manuell auslösen <br>
-    📁 Ordner wählen kein Ordner Fallback: Downloads nutzen <br>
-    Kamera: ? Dateizugriff: ? 0 FPS
-  </p>
-  <h3>Erkennung</h3>
-  <p>
-    Personenerkennung Folien-Änderung <br>
-    Schwellwert Änderung: 12% <br>
-    Person: unbekannt Folie: stabil
-  </p>
-  <h3>Status</h3>
-  <pre>https://</pre>
-  <pre>http://localhost</pre>
-  <p>
-    Board erkannt-<br>
-    Auflösung-<br>
-    Modell-<br>
-    Gespeichert0
-  </p>
-  <p>
-    Hinweis: Kamera-Zugriff funktioniert nur über <b>HTTPS</b> oder <b>localhost</b>.<br>
-    Auf Android per Chrome empfohlen.<br>
-    Mehr Infos: getUserMedia (MDN) & File System Access API (Chrome).
-  </p>
+  <!-- Aufnahme & Ordner -->
+  <section class="panel">
+    <h2>Aufnahme & Ordner</h2>
+    <div class="row">
+      <button id="startBtn">🔴 Kamera starten</button>
+      <button id="stopBtn" disabled>⏹️ Stop</button>
+      <label class="row" title="Wenn unterstützt, schaltet die LED ein/aus">
+        <input type="checkbox" id="torchToggle" disabled />
+        <span>🔦 Taschenlampe</span>
+      </label>
+      <button id="snapBtn" disabled>📸 Manuell auslösen</button>
+      <button id="dirBtn">📁 Ordner wählen</button>
+      <span id="chosenDir" class="tag">kein Ordner</span>
+    </div>
+
+    <div class="kv mono" style="margin-top:8px">
+      <div>Kamera:</div><div id="camStatus">?</div>
+      <div>Dateizugriff:</div><div id="fsStatus">?</div>
+      <div>FPS:</div><div id="fpsMeter">0</div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <!-- Live Video -->
+    <section class="panel">
+      <h2>Vorschau</h2>
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="canvas" hidden></canvas>
+    </section>
+
+    <!-- Erkennung & Status -->
+    <section class="panel">
+      <h2>Erkennung</h2>
+      <div class="kv mono">
+        <div>Personenerkennung</div>
+        <div id="personStatus">nicht aktiv</div>
+        <div>Folien‑Änderung</div>
+        <div class="row">
+          <span id="slideStatus" class="tag">Folie: stabil</span>
+          <label class="row" title="Schwellwert für Bilddifferenz (0–100%)">
+            Schwellwert Änderung:
+            <input type="number" id="thresh" value="12" min="1" max="100" style="width:70px" />%
+          </label>
+        </div>
+        <div>Person:</div><div id="personText">unbekannt</div>
+      </div>
+
+      <h2 style="margin-top:14px">Status</h2>
+      <div class="mono">
+        <div>Kontext:
+          <code>https://</code> | <code>http://localhost</code>
+          <span id="secureHint" class="warn"></span>
+        </div>
+        <div id="board">Board erkannt‑</div>
+        <div id="res">Auflösung‑</div>
+        <div id="model">Modell‑</div>
+        <div>Gespeichert <span id="savedCount">0</span></div>
+      </div>
+      <small>Hinweis: Kamera-Zugriff funktioniert nur über <b>HTTPS</b> oder <b>localhost</b>. Auf Android per Chrome empfohlen.</small>
+    </section>
+  </div>
+
   <script>
-    async function startCamera() {
-      const video = document.getElementById('video');
-      const errorDiv = document.getElementById('error');
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false
-        });
-        video.srcObject = stream;
-        errorDiv.textContent = "";
-      } catch (err) {
-        errorDiv.textContent = "Kamera konnte nicht gestartet werden: " + err.message;
-      }
+    // --- Elemente ---
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn  = document.getElementById('stopBtn');
+    const torchToggle = document.getElementById('torchToggle');
+    const snapBtn  = document.getElementById('snapBtn');
+    const dirBtn   = document.getElementById('dirBtn');
+    const chosenDir= document.getElementById('chosenDir');
+
+    const camStatus= document.getElementById('camStatus');
+    const fsStatus = document.getElementById('fsStatus');
+    const fpsMeter = document.getElementById('fpsMeter');
+    const secureHint = document.getElementById('secureHint');
+
+    const slideStatus = document.getElementById('slideStatus');
+    const threshInput = document.getElementById('thresh');
+    const personStatus= document.getElementById('personStatus');
+    const personText  = document.getElementById('personText');
+
+    const resEl   = document.getElementById('res');
+    const modelEl = document.getElementById('model');
+    const savedEl = document.getElementById('savedCount');
+
+    // --- State ---
+    let stream = null, videoTrack = null, rafId = null;
+    let frames = 0, lastSec = performance.now();
+    let fps = 0, savedCount = 0;
+    let dirHandle = null;
+    let lastSmallFrame = null;
+    let faceDetector = null; // optional
+
+    const isSecure = () => location.protocol === 'https:' || location.hostname === 'localhost';
+
+    // --- Setup ---
+    modelEl.textContent = 'Modell – ' + (navigator.userAgentData?.brands?.map(b=>`${b.brand} ${b.version}`).join(', ')
+                          || navigator.userAgent);
+    if (!isSecure()) {
+      secureHint.textContent = ' (unsicherer Kontext – Kamera kann blockiert sein)';
     }
-    startCamera();
+
+    // Optional: FaceDetector, falls vorhanden
+    if ('FaceDetector' in window) {
+      try {
+        faceDetector = new FaceDetector({ fastMode: true });
+        personStatus.textContent = 'aktiv (experimentell)';
+      } catch {
+        faceDetector = null;
+      }
+    } else {
+      personStatus.textContent = 'nicht unterstützt';
+    }
+
+    // --- Kamera starten ---
+    async function startCamera() {
+      stopCamera(); // sauber neu starten
+
+      const preferred = {
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+
+      try {
+        camStatus.className = 'mono warn';
+        camStatus.textContent = 'Starte ...';
+        stream = await navigator.mediaDevices.getUserMedia(preferred);
+      } catch (e1) {
+        console.warn('preferred constraints failed', e1);
+        try {
+          camStatus.textContent = 'Fallback ...';
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } catch (e2) {
+          handleCamError(e2);
+          return;
+        }
+      }
+
+      video.srcObject = stream;
+      videoTrack = stream.getVideoTracks()[0];
+
+      // Torch prüfen
+      torchToggle.disabled = true;
+      if (videoTrack?.getCapabilities) {
+        const caps = videoTrack.getCapabilities();
+        if (caps.torch) torchToggle.disabled = false;
+      }
+
+      // Abspielen erzwingen
+      try { await video.play(); } catch (e) {
+        // Autoplay-Block – Nutzerinteraktion via Button nötig (diese haben wir bereits)
+        console.warn('video.play() blocked', e);
+      }
+
+      video.addEventListener('loadedmetadata', () => {
+        resEl.textContent = `Auflösung – ${video.videoWidth}×${video.videoHeight}`;
+        startRenderLoop();
+      }, { once: true });
+
+      startBtn.disabled = true;
+      stopBtn.disabled  = false;
+      snapBtn.disabled  = false;
+
+      camStatus.className = 'mono ok';
+      camStatus.textContent = 'läuft';
+    }
+
+    function handleCamError(err) {
+      console.error(err);
+      camStatus.className = 'mono err';
+      let msg = 'Fehler';
+      switch (err.name) {
+        case 'NotAllowedError': msg = 'Zugriff verweigert (Seiteneinstellungen → Kamera erlauben)'; break;
+        case 'NotFoundError': msg = 'Keine Kamera gefunden'; break;
+        case 'OverconstrainedError': msg = 'Angeforderte Auflösung nicht verfügbar'; break;
+        case 'SecurityError': msg = 'Unsicherer Kontext (HTTPS/localhost erforderlich)'; break;
+        default: msg = err.message || String(err);
+      }
+      camStatus.textContent = msg;
+      startBtn.disabled = false;
+      stopBtn.disabled  = true;
+      snapBtn.disabled  = true;
+    }
+
+    function stopCamera() {
+      if (rafId) cancelAnimationFrame(rafId), rafId = null;
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      videoTrack = null;
+      video.srcObject = null;
+      fps = 0; frames = 0;
+      fpsMeter.textContent = '0';
+      camStatus.className = 'mono';
+      camStatus.textContent = 'gestoppt';
+      startBtn.disabled = false;
+      stopBtn.disabled  = true;
+      snapBtn.disabled  = true;
+      torchToggle.checked = false;
+      torchToggle.disabled = true;
+    }
+
+    // --- Render- & Analyse-Loop ---
+    const smallW = 160, smallH = 90; // für Diff/Face kostengünstig
+    const smallCanvas = new OffscreenCanvas ? new OffscreenCanvas(smallW, smallH) : (() => {
+      const c = document.createElement('canvas'); c.width = smallW; c.height = smallH; return c;
+    })();
+    const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true });
+
+    function startRenderLoop() {
+      function loop(now = performance.now()) {
+        rafId = requestAnimationFrame(loop);
+
+        if (video.readyState >= 2) {
+          // FPS messen
+          frames++;
+          if (now - lastSec >= 1000) {
+            fps = frames; frames = 0; lastSec = now;
+            fpsMeter.textContent = String(fps);
+          }
+
+          // Canvas-Größe einmalig setzen
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          }
+
+          // Optional: Live-Bild auf Canvas spiegeln (z. B. für spätere Verarbeitung)
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          // --- Folien-Änderungs-Erkennung (einfache Frame-Differenz) ---
+          smallCtx.drawImage(video, 0, 0, smallW, smallH);
+          const img = smallCtx.getImageData(0, 0, smallW, smallH);
+          const curr = img.data;
+
+          let diffRatio = 0;
+          if (lastSmallFrame && lastSmallFrame.length === curr.length) {
+            let sum = 0, len = curr.length;
+            for (let i=0; i<len; i+=4) {
+              // einfache Luma aus RGB
+              const y1 = (lastSmallFrame[i]*0.299 + lastSmallFrame[i+1]*0.587 + lastSmallFrame[i+2]*0.114);
+              const y2 = (curr[i]*0.299 + curr[i+1]*0.587 + curr[i+2]*0.114);
+              sum += Math.abs(y2 - y1);
+            }
+            const maxSum = (smallW*smallH) * 255;
+            diffRatio = sum / maxSum; // 0..1
+          }
+          lastSmallFrame = new Uint8ClampedArray(curr); // kopie
+
+          const threshold = Math.min(Math.max(Number(threshInput.value) || 12, 1), 100)/100;
+          if (diffRatio > threshold) {
+            slideStatus.textContent = 'Folie: geändert';
+            slideStatus.className = 'tag warn';
+          } else {
+            slideStatus.textContent = 'Folie: stabil';
+            slideStatus.className = 'tag';
+          }
+
+          // --- Personenerkennung (nur wenn FaceDetector vorhanden) ---
+          if (faceDetector && (fps % 5 === 0)) {
+            // gelegentlich prüfen, um Last zu sparen
+            (async () => {
+              try {
+                // FaceDetector kann mit HTMLVideoElement direkt arbeiten in einigen Browsern,
+                // ansonsten ein kleines Canvas-Bild verwenden:
+                let faces;
+                if (faceDetector.detect.length === 1) {
+                  faces = await faceDetector.detect(video);
+                } else {
+                  faces = await faceDetector.detect(canvas); // Fallback
+                }
+                personText.textContent = faces?.length ? `${faces.length} erkannt` : 'keine';
+              } catch {
+                personText.textContent = 'unbekannt';
+              }
+            })();
+          }
+        }
+      }
+      loop();
+    }
+
+    // --- Taschenlampe ---
+    torchToggle.addEventListener('change', async () => {
+      if (!videoTrack) return;
+      try {
+        await videoTrack.applyConstraints({ advanced: [{ torch: torchToggle.checked }] });
+      } catch (e) {
+        console.warn('Torch nicht unterstützt/erlaubt', e);
+        torchToggle.checked = false;
+      }
+    });
+
+    // --- Ordner wählen / Dateizugriff ---
+    dirBtn.addEventListener('click', async () => {
+      if (!window.showDirectoryPicker) {
+        fsStatus.className = 'mono warn';
+        fsStatus.textContent = 'API nicht unterstützt – nutze Download-Fallback';
+        chosenDir.textContent = 'kein Ordner';
+        return;
+      }
+      try {
+        dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        chosenDir.textContent = '…/' + (dirHandle.name || 'Ordner');
+        fsStatus.className = 'mono ok';
+        fsStatus.textContent = 'gewährt';
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          fsStatus.className = 'mono err';
+          fsStatus.textContent = 'verweigert';
+        }
+      }
+    });
+
+    // --- Manuell auslösen ---
+    snapBtn.addEventListener('click', async () => {
+      if (!video || !video.srcObject) return;
+      // Sicherstellen, dass Canvas passt
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      }
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
+      const ts = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const name = `tafel_${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}_${ts.getMilliseconds()}.jpg`;
+
+      if (dirHandle) {
+        try {
+          const fileHandle = await dirHandle.getFileHandle(name, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          savedEl.textContent = String(++savedCount);
+        } catch (e) {
+          console.warn('Schreiben fehlgeschlagen, Fallback Download', e);
+          downloadBlob(blob, name);
+        }
+      } else {
+        // Kein Ordner gewählt → Browser-Download (landet i. d. R. in „Downloads“)
+        downloadBlob(blob, name);
+        savedEl.textContent = String(++savedCount);
+      }
+    });
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      fsStatus.className = 'mono warn';
+      fsStatus.textContent = 'Download-Fallback';
+    }
+
+    // --- Buttons ---
+    startBtn.addEventListener('click', () => {
+      if (!('mediaDevices' in navigator) || !('getUserMedia' in navigator.mediaDevices)) {
+        camStatus.className = 'mono err';
+        camStatus.textContent = 'getUserMedia nicht unterstützt';
+        return;
+      }
+      if (!isSecure()) {
+        // Wir versuchen es trotzdem, zeigen aber den Hinweis
+        secureHint.textContent = ' (unsicherer Kontext – Kamera kann blockiert sein)';
+      } else {
+        secureHint.textContent = '';
+      }
+      startCamera();
+    });
+    stopBtn.addEventListener('click', stopCamera);
+
+    // Sichtbarkeitswechsel: viele Geräte pausieren Kamera im Hintergrund
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      if (video.srcObject) {
+        resEl.textContent = `Auflösung – ${video.videoWidth}×${video.videoHeight}`;
+      }
+    });
+
+    // Dummy "Board erkannt" – hier könntest du später echte Logik einsetzen
+    document.getElementById('board').textContent = 'Board erkannt – (Demo)';
+
   </script>
 </body>
 </html>

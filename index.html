@@ -8,23 +8,39 @@
 <style>
   :root { color-scheme: dark; --bg:#0b0e13; --fg:#e9eef5; --muted:#a7b3c0; --accent:#4ea1ff; --ok:#11c46a; --warn:#ffb020; --bad:#ff4d6d; }
   html,body { margin:0; padding:0; background:var(--bg); color:var(--fg); font-family: system-ui, Segoe UI, Roboto, Ubuntu, sans-serif; height:100%; overflow:hidden; }
-  #app { display:grid; grid-template-rows:auto 1fr auto; height:100dvh; width:100vw; }
+  #app { display:grid; grid-template-rows:auto 1fr auto auto; height:100dvh; width:100vw; }
+
+  /* Header / Controls */
   header { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; padding:.5rem .75rem; background:#0f131a; border-bottom:1px solid #1a212c; }
   header .group { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
-  button, select, label.chip { background:#16202c; color:var(--fg); border:1px solid #223041; border-radius:.5rem; padding:.5rem .65rem; font-size:.95rem; }
+  button, select, label.chip { background:#16202c; color:var(--fg); border:1px solid #223041; border-radius:.5rem; padding:.45rem .6rem; font-size:.95rem; }
   button.primary { background:#1a2b3f; border-color:#2a4060; }
   .kpi { font-variant-numeric: tabular-nums; color:var(--muted); }
   .kpi b { color:var(--fg); }
-  #stage { position:relative; background:#000; overflow:hidden; touch-action:none; }
+  .spacer{flex:1}
+
+  /* Stage */
+  #stage { position:relative; background:#000; overflow:hidden; }
   video, canvas#overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform-origin:center; }
   canvas#overlay { pointer-events:none; }
-  #bottomBar { display:flex; align-items:center; gap:.75rem; padding:.6rem .8rem; background:#0f131a; border-top:1px solid #1a212c; }
-  #zoomSlider{ width:100%; }
+  #banner { position:absolute; left:50%; top:10px; transform:translateX(-50%); background:rgba(0,0,0,.8); border:1px solid #263445; border-radius:.5rem; padding:.45rem .7rem; font-size:.9rem; z-index:5; display:none; }
+
+  /* Bottom bars */
+  #bottomBar { display:flex; gap:.75rem; align-items:center; padding:.6rem .8rem; background:#0f131a; border-top:1px solid #1a212c; }
+  #zoomSlider { width:100%; }
   #status { display:grid; grid-template-columns: repeat(5, auto); gap:.75rem 1.2rem; align-items:center; padding:.35rem .75rem; font-size:.9rem; color:var(--muted); }
   .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
-  .spacer{flex:1} .mono{font-family:ui-monospace, Menlo, Consolas, monospace}
-  #banner { position:absolute; left:50%; top:10px; transform:translateX(-50%); background:rgba(0,0,0,.8); border:1px solid #263445; border-radius:.5rem; padding:.45rem .7rem; font-size:.9rem; z-index:5; display:none; }
-  #debug { position:absolute; right:.5rem; bottom:.5rem; background:rgba(0,0,0,.75); border:1px solid #263445; border-radius:.5rem; padding:.4rem .6rem; font-size:.8rem; color:var(--muted); max-width:45vw; pointer-events:none; display:none; white-space:pre; z-index:6; }
+  .mono{font-family:ui-monospace, Menlo, Consolas, monospace}
+
+  /* Landscape: kompakter Header, Status in eine Zeile, Bühne maximal */
+  @media (orientation:landscape) {
+    #app { grid-template-rows: auto 1fr auto auto; }
+    header { gap:.4rem; padding:.4rem .6rem; }
+    header .group { gap:.4rem; }
+    button, select, label.chip { padding:.35rem .5rem; font-size:.9rem; }
+    #bottomBar { padding:.45rem .6rem; }
+    #status { grid-template-columns: repeat(5, minmax(0, auto)); gap:.5rem .8rem; font-size:.85rem; }
+  }
 </style>
 </head>
 <body>
@@ -32,19 +48,21 @@
   <header>
     <div class="group">
       <button id="btnStart" class="primary">🎥 Kamera starten</button>
-      <select id="selCam" title="Kamera / Linse wählen" disabled><option>—</option></select>
+      <select id="selCam" title="Kamera/Linse" disabled><option>—</option></select>
+      <select id="selQuality" title="Qualität" disabled>
+        <option value="auto" selected>Auto (Max)</option>
+        <option value="2160">2160p</option>
+        <option value="1440">1440p</option>
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+      </select>
+      <button id="btnManualBoard">✏️ Tafel manuell</button>
+      <button id="btnResetBoard">♻️ Reset</button>
       <button id="btnSnap" disabled>📸 Manuell</button>
     </div>
     <div class="group">
       <button id="btnDir">📁 Ordner wählen</button>
       <span id="saveMode" class="kpi">Speichern: <b>Download</b></span>
-    </div>
-    <div class="group">
-      <label class="chip"><input type="checkbox" id="tglBoardChange" checked> Folien-Änderung</label>
-      <label class="chip"><input type="checkbox" id="tglAuto"> Auto Foto</label>
-      <label class="chip"><input type="checkbox" id="tglBlocker" checked> Objekte blockieren</label>
-      <label class="chip"><input type="checkbox" id="tglFace"> Face-Blocker (optional)</label>
-      <label class="chip"><input type="checkbox" id="tglOCR"> OCR (optional)</label>
     </div>
     <div class="spacer"></div>
     <div class="group">
@@ -57,13 +75,18 @@
     <div id="banner"></div>
     <video id="video" playsinline muted></video>
     <canvas id="overlay"></canvas>
-    <div id="debug"></div>
   </div>
 
   <div id="bottomBar">
     <label for="zoomSlider">🔎 Zoom</label>
     <input id="zoomSlider" type="range" min="1" max="10" step="0.01" value="1" disabled>
     <span id="zoomInfo" class="kpi">Anzeige 1.00× | HW —</span>
+    <span class="spacer"></span>
+    <label class="chip"><input type="checkbox" id="tglBoardChange" checked> Folien-Änderung</label>
+    <label class="chip"><input type="checkbox" id="tglAuto"> Auto Foto</label>
+    <label class="chip"><input type="checkbox" id="tglBlocker" checked> Objekte blockieren</label>
+    <label class="chip"><input type="checkbox" id="tglFace"> Face-Blocker</label>
+    <label class="chip"><input type="checkbox" id="tglOCR"> OCR</label>
   </div>
 
   <div id="status">
@@ -76,94 +99,46 @@
 </div>
 
 <script>
-/* =================== Basis & Helper =================== */
-const $ = s => document.querySelector(s);
-const on = (el, ev, fn, opts) => el.addEventListener(ev, fn, opts);
-const clamp = (v,l,h)=>Math.max(l,Math.min(h,v));
-const fmt = (n,d=2)=>Number(n).toFixed(d);
-const QS = new URLSearchParams(location.search);
-const NO_CV = QS.get('nocv') === '1'; // optional: OpenCV komplett aus
+/* ===== Basics ===== */
+const $=s=>document.querySelector(s), on=(el,ev,fn,o)=>el.addEventListener(ev,fn,o);
+const clamp=(v,l,h)=>Math.max(l,Math.min(h,v)), fmt=(n,d=2)=>Number(n).toFixed(d);
+const banner=$('#banner'); function showBanner(t,cls='warn',ms=3000){ banner.textContent=t; banner.style.display='block'; banner.style.borderColor=cls==='bad'?'#7a2a2a':cls==='ok'?'#2f6a45':'#263445'; clearTimeout(showBanner._t); showBanner._t=setTimeout(()=>banner.style.display='none',ms); }
+const storeKey='tafelcapture.v4'; const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(storeKey)||'{}')}catch{return{}}}; const saveCfg=(c)=>localStorage.setItem(storeKey,JSON.stringify(c));
 
-const banner = $('#banner');
-function showBanner(msg, cls='warn', ms=3000){
-  banner.textContent = msg;
-  banner.style.display = 'block';
-  banner.style.borderColor = cls==='bad'?'#7a2a2a' : cls==='ok'?'#2f6a45' : '#263445';
-  clearTimeout(showBanner._t);
-  showBanner._t = setTimeout(()=> banner.style.display = 'none', ms);
-}
+/* ===== Elements ===== */
+const video=$('#video'), overlay=$('#overlay'), ctxOv=overlay.getContext('2d');
+const btnStart=$('#btnStart'), selCam=$('#selCam'), selQuality=$('#selQuality'), btnSnap=$('#btnSnap');
+const btnManualBoard=$('#btnManualBoard'), btnResetBoard=$('#btnResetBoard');
+const btnDir=$('#btnDir'), saveMode=$('#saveMode');
+const tglBoardChange=$('#tglBoardChange'), tglAuto=$('#tglAuto'), tglBlocker=$('#tglBlocker'), tglFace=$('#tglFace'), tglOCR=$('#tglOCR');
+const kpiRes=$('#kpiRes'), kpiFps=$('#kpiFps'), stBoard=$('#stBoard'), stAuto=$('#stAuto'), stBlock=$('#stBlock'), stModels=$('#stModels'), stDiff=$('#stDiff');
+const zoomSlider=$('#zoomSlider'), zoomInfo=$('#zoomInfo');
 
-const debugBox = $('#debug');
-let SHOW_DEBUG = false;
-function debug(msg){ if (!SHOW_DEBUG) return; debugBox.style.display='block'; debugBox.textContent = String(msg); clearTimeout(debug._t); debug._t=setTimeout(()=>debugBox.style.display='none', 1500); }
-
-/* =================== Elemente =================== */
-const video = $('#video');
-const overlay = $('#overlay');
-const ctxOv = overlay.getContext('2d', { willReadFrequently: true });
-
-const btnStart = $('#btnStart');
-const selCam = $('#selCam');
-const btnSnap = $('#btnSnap');
-const btnDir = $('#btnDir');
-const saveMode = $('#saveMode');
-
-const tglBoardChange = $('#tglBoardChange');
-const tglAuto = $('#tglAuto');
-const tglBlocker = $('#tglBlocker');
-const tglFace = $('#tglFace');
-const tglOCR = $('#tglOCR');
-
-const kpiRes = $('#kpiRes');
-const kpiFps = $('#kpiFps');
-const stBoard = $('#stBoard');
-const stAuto = $('#stAuto');
-const stBlock = $('#stBlock');
-const stModels = $('#stModels');
-const stDiff = $('#stDiff');
-const zoomSlider = $('#zoomSlider');
-const zoomInfo = $('#zoomInfo');
-
-/* =================== Persistenz =================== */
-const STORE_KEY = 'tafelcapture.v3';
-function loadCfg(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY)||'{}'); }catch{return {};} }
-function saveCfg(cfg){ localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); }
-
-/* =================== State =================== */
+/* ===== State ===== */
 let mediaStream=null, track=null, caps=null, sets=null;
 let hardwareZoom=false, hwMin=1, hwMax=1, displayZoom=1;
 let dirHandle=null, haveFSAccess=('showDirectoryPicker' in window);
-
-let cvReady=false, cvFailed=false; // OpenCV status
+let cvReady=false, cvFailed=false;
 let loopRunning=false;
 
-let boardQuad=null, boardFound=false, H_warp=null, targetW=1600, targetH=900;
-
+let boardQuad=null, boardFound=false, H_warp=null;
+let targetW=1600, targetH=900; // dynamisch korrigiert
 let prevThumb=null, lastChangeTs=0;
 const CHANGE_THRESH=0.09, STABLE_MS=800, COOLDOWN_MS=3500;
+let fpsCounter={last:performance.now(), frames:0};
 
-let fpsCounter={ last: performance.now(), frames: 0 };
+let manualMode=false, manualPts=[];
 
-/* =================== Layout & Zoom =================== */
-function resizeOverlay(){
-  const r = video.getBoundingClientRect();
-  overlay.width = Math.max(2, Math.round(r.width));
-  overlay.height = Math.max(2, Math.round(r.height));
-}
+/* ===== Layout ===== */
+function resizeOverlay(){ const r=video.getBoundingClientRect(); overlay.width=Math.max(2,Math.round(r.width)); overlay.height=Math.max(2,Math.round(r.height)); }
 new ResizeObserver(resizeOverlay).observe($('#stage'));
-
-function applyDisplayTransform(){
-  const t = `scale(${displayZoom})`;
-  video.style.transform = t;
-  overlay.style.transform = t;
-}
-
+function applyDisplayTransform(){ const t=`scale(${displayZoom})`; video.style.transform=t; overlay.style.transform=t; }
+on(zoomSlider,'input',()=>applyZoom(parseFloat(zoomSlider.value)));
 async function applyZoom(total){
-  let hw=1, disp = total;
+  let hw=1, disp=total;
   if (hardwareZoom){
     hw = clamp(total, hwMin, hwMax);
-    try { await track.applyConstraints({ advanced: [{ zoom: hw }] }); }
-    catch(e){ console.warn('HW-zoom fail', e); hw=1; disp = total; }
+    try { await track.applyConstraints({ advanced:[{ zoom: hw }] }); } catch(e){ console.warn('HW zoom fail', e); hw=1; disp=total; }
     disp = total / hw;
   }
   displayZoom = clamp(disp, 1, 10);
@@ -171,329 +146,342 @@ async function applyZoom(total){
   zoomInfo.textContent = `Anzeige ${fmt(displayZoom,2)}× | HW ${hardwareZoom?fmt(hw,2)+'×':'—'}`;
 }
 
-on(zoomSlider, 'input', () => applyZoom(parseFloat(zoomSlider.value)));
-
-// Pinch-to-zoom
-const stage = $('#stage');
-let pointers = new Map(), pinchStartDist=0, pinchStartZoom=1;
-const dist = (a,b)=>Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
-on(stage,'pointerdown',(e)=>{ stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, e); if (pointers.size===2){ const [p1,p2]=[...pointers.values()]; pinchStartDist=dist(p1,p2); pinchStartZoom=parseFloat(zoomSlider.value); } });
-on(stage,'pointermove',(e)=>{ if(!pointers.has(e.pointerId))return; pointers.set(e.pointerId, e); if (pointers.size===2){ const [p1,p2]=[...pointers.values()]; const ratio = dist(p1,p2)/(pinchStartDist||1); const z = clamp(pinchStartZoom*ratio, 1, 10); zoomSlider.value=z; applyZoom(z); } });
-on(stage,'pointerup',(e)=>pointers.delete(e.pointerId));
-on(stage,'pointercancel',(e)=>pointers.delete(e.pointerId));
-
-/* =================== File System Access =================== */
+/* ===== FS Access ===== */
 async function chooseDirectory(){
-  if (!haveFSAccess){ showBanner('FS Access API nicht unterstützt – nutze Downloads', 'warn', 4000); return; }
+  if (!haveFSAccess){ showBanner('FS Access API nicht unterstützt – nutze Downloads','warn',4000); return; }
   try{
-    dirHandle = await window.showDirectoryPicker({ mode:'readwrite' });
-    saveMode.innerHTML = 'Speichern: <b>Ordner</b>';
+    dirHandle = await window.showDirectoryPicker({mode:'readwrite'});
+    saveMode.innerHTML='Speichern: <b>Ordner</b>';
   }catch(e){ console.warn('dir pick', e); }
 }
-
 async function saveImage(blob, base='Tafel'){
   const t=new Date(), p=s=>String(s).padStart(2,'0');
-  const name = `${base}_${t.getFullYear()}${p(t.getMonth()+1)}${p(t.getDate())}_${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}.png`;
+  const name=`${base}_${t.getFullYear()}${p(t.getMonth()+1)}${p(t.getDate())}_${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}.png`;
   if (dirHandle && haveFSAccess){
-    try{
-      const perm = await dirHandle.requestPermission?.({ mode:'readwrite' });
-      if (perm === 'granted'){
-        const fh = await dirHandle.getFileHandle(name, { create:true });
-        const w = await fh.createWritable(); await w.write(blob); await w.close();
-        return { mode:'folder', name };
+    try {
+      const perm=await dirHandle.requestPermission?.({mode:'readwrite'});
+      if (perm==='granted'){
+        const fh=await dirHandle.getFileHandle(name,{create:true}); const w=await fh.createWritable(); await w.write(blob); await w.close();
+        return {mode:'folder', name};
       }
-    }catch(e){ console.warn('save folder', e); }
+    } catch(e){ console.warn('save folder',e); }
   }
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); URL.revokeObjectURL(a.href); a.remove();
-  return { mode:'download', name };
+  return {mode:'download', name};
 }
 
-/* =================== OpenCV Loader (Redundant) =================== */
-/** Lädt OpenCV aus mehreren Quellen; wenn alle scheitern, läuft App ohne OpenCV */
-async function loadOpenCV(){
-  if (NO_CV){ stModels.textContent='(ohne OpenCV – nocv=1)'; return false; }
-  if (cvReady) return true;
+/* ===== Script loader (redundant) ===== */
+function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.async=true; s.onload=()=>res(); s.onerror=e=>rej(e); document.head.appendChild(s); }); }
 
+/* ===== OpenCV (redundant Quellen) ===== */
+async function loadOpenCV(){
+  if (cvReady) return true;
   const sources = [
     'https://docs.opencv.org/4.x/opencv.js',
     'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0/opencv.js',
     'https://cdn.jsdelivr.net/gh/opencv/opencv@4.x/build_js/bin/opencv.js'
   ];
-
   for (const src of sources){
     try{
-      await loadOpenCVFrom(src, 12000);
-      stModels.textContent = 'OpenCV, Motion';
-      cvReady = true;
+      const base=src.substring(0,src.lastIndexOf('/')+1);
+      window.Module = { locateFile: (p)=> base + p };
+      await loadScript(src);
+      await new Promise((res,rej)=>{
+        const start=performance.now();
+        (function wait(){
+          if (typeof cv!=='undefined' && cv?.Mat) return res();
+          if (performance.now()-start>12000) return rej(new Error('OpenCV runtime timeout'));
+          requestAnimationFrame(wait);
+        })();
+      });
+      cvReady=true; stModels.textContent='OpenCV, Motion';
       return true;
     }catch(e){
-      console.warn('OpenCV source failed:', src, e);
+      console.warn('OpenCV load fail', src, e);
     }
   }
-  stModels.textContent='(ohne OpenCV)';
-  cvFailed = true;
-  showBanner('OpenCV nicht geladen – Erkennung aus', 'warn', 5000);
+  cvFailed=true; stModels.textContent='(ohne OpenCV)';
+  showBanner('OpenCV nicht geladen – Erkennung aus','warn',5000);
   return false;
 }
 
-/** Lädt eine einzelne OpenCV-Quelle, mit korrektem locateFile relativ zur Quelle */
-function loadOpenCVFrom(src, timeoutMs=12000){
-  return new Promise((resolve, reject)=>{
-    const base = src.substring(0, src.lastIndexOf('/')+1);
-    // Jede Quelle braucht ein eigenes Module-Objekt VOR dem Script
-    window.Module = {
-      locateFile: (path) => base + path
-    };
-    const s=document.createElement('script');
-    s.src=src; s.async=true;
-    s.onload=()=> {
-      const start=performance.now();
-      const check=()=>{
-        if (typeof cv!=='undefined' && cv?.Mat){ return resolve(true); }
-        if (performance.now() - start > timeoutMs) return reject(new Error('OpenCV runtime timeout'));
-        requestAnimationFrame(check);
-      };
-      check();
-    };
-    s.onerror=(e)=> reject(new Error('Script load error'));
-    document.head.appendChild(s);
-  });
-}
-
-/* =================== OpenCV Utils =================== */
+/* ===== OpenCV utils: robustere Erkennung ===== */
 function orderTLTRBRBL(pts){
   const bySum=[...pts].sort((a,b)=>(a.x+a.y)-(b.x+b.y));
   const byDiff=[...pts].sort((a,b)=>(a.x-a.y)-(b.x-b.y));
   const tl=bySum[0], br=bySum[bySum.length-1], tr=byDiff[byDiff.length-1], bl=byDiff[0];
   return [tl,tr,br,bl];
 }
-
-function detectBoardQuad(frameCanvas, scale=0.5){
-  const w=frameCanvas.width, h=frameCanvas.height;
-  const sw=Math.max(320, Math.round(w*scale)), sh=Math.max(180, Math.round(h*scale));
+function detectBoardQuad(frameCanvas){
+  // 1) Preprocessing mit Kontrastboost
+  const w=frameCanvas.width,h=frameCanvas.height;
+  const sw=Math.max(360, Math.round(w*0.5)), sh=Math.max(200, Math.round(h*0.5));
   const src=cv.imread(frameCanvas);
   const resized=new cv.Mat(); cv.resize(src,resized,new cv.Size(sw,sh),0,0,cv.INTER_AREA);
   const gray=new cv.Mat(); cv.cvtColor(resized,gray,cv.COLOR_RGBA2GRAY);
+  try { // equalize
+    cv.equalizeHist(gray, gray);
+  } catch { /* fallback: skip */ }
   cv.GaussianBlur(gray,gray,new cv.Size(5,5),0);
-  const edges=new cv.Mat(); cv.Canny(gray,edges,60,150);
-  const kernel=cv.Mat.ones(3,3,cv.CV_8U); cv.dilate(edges,edges,kernel);
-  const contours=new cv.MatVector(), hierarchy=new cv.Mat();
-  cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
 
+  // 2) Zwei Passes: Canny stark, dann adaptiv + Closing
   let best=null, bestScore=-1;
-  for (let i=0;i<contours.size();i++){
-    const cnt=contours.get(i);
-    const peri=cv.arcLength(cnt,true);
-    const approx=new cv.Mat(); cv.approxPolyDP(cnt, approx, 0.02*peri, true);
-    if (approx.rows!==4){ approx.delete(); continue; }
-    if (!cv.isContourConvex(approx)){ approx.delete(); continue; }
-    const area=cv.contourArea(approx); if (area < sw*sh*0.12){ approx.delete(); continue; }
-    const d=approx.data32S, pts=[]; for(let j=0;j<d.length;j+=2) pts.push({x:d[j], y:d[j+1]});
-    const ord=orderTLTRBRBL(pts);
-    const w1=Math.hypot(ord[1].x-ord[0].x, ord[1].y-ord[0].y), w2=Math.hypot(ord[2].x-ord[3].x, ord[2].y-ord[3].y);
-    const h1=Math.hypot(ord[3].x-ord[0].x, ord[3].y-ord[0].y), h2=Math.hypot(ord[2].x-ord[1].x, ord[2].y-ord[1].y);
-    const wAvg=(w1+w2)/2, hAvg=(h1+h2)/2;
-    const rectScore=1 - Math.abs(w1-w2)/wAvg - Math.abs(h1-h2)/hAvg;
-    const areaScore=area/(sw*sh);
-    const ar=wAvg/hAvg; const arScore=(ar>0.8 && ar<2.2)?0.5:0;
-    const score=areaScore + rectScore + arScore;
-    if (score>bestScore){
-      bestScore=score;
-      best = ord.map(p=>({ x:p.x*(w/sw), y:p.y*(h/sh) }));
+  const passes = [
+    { useAdaptive:false, canny:[60,150], close:3 },
+    { useAdaptive:true, canny:[40,120], close:5 }
+  ];
+
+  for (const pass of passes){
+    let edges=new cv.Mat();
+    if (pass.useAdaptive){
+      let thr=new cv.Mat();
+      cv.adaptiveThreshold(gray, thr, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
+      edges = thr; // binär
+    } else {
+      cv.Canny(gray, edges, pass.canny[0], pass.canny[1]);
     }
-    approx.delete();
+    const kernel=cv.Mat.ones(pass.close, pass.close, cv.CV_8U);
+    cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, kernel);
+
+    const contours=new cv.MatVector(), hierarchy=new cv.Mat();
+    cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+
+    for (let i=0;i<contours.size();i++){
+      const cnt=contours.get(i);
+      const peri=cv.arcLength(cnt,true);
+      const approx=new cv.Mat(); cv.approxPolyDP(cnt, approx, 0.02*peri, true);
+      const area = cv.contourArea(cnt);
+      // Erst quadrilaterale Konturen
+      if (approx.rows===4 && cv.isContourConvex(approx) && area > (sw*sh*0.10)){
+        const d=approx.data32S, pts=[]; for(let j=0;j<d.length;j+=2) pts.push({x:d[j],y:d[j+1]});
+        const ord=orderTLTRBRBL(pts);
+        const w1=Math.hypot(ord[1].x-ord[0].x, ord[1].y-ord[0].y), w2=Math.hypot(ord[2].x-ord[3].x, ord[2].y-ord[3].y);
+        const h1=Math.hypot(ord[3].x-ord[0].x, ord[3].y-ord[0].y), h2=Math.hypot(ord[2].x-ord[1].x, ord[2].y-ord[1].y);
+        const wAvg=(w1+w2)/2, hAvg=(h1+h2)/2;
+        const rectScore=1 - Math.abs(w1-w2)/Math.max(1,wAvg) - Math.abs(h1-h2)/Math.max(1,hAvg);
+        const areaScore = area / (sw*sh);
+        const ar=wAvg/Math.max(1,hAvg); const arScore=(ar>0.7 && ar<2.5)?0.5:0;
+        const score=areaScore + rectScore + arScore;
+        if (score>bestScore){
+          bestScore=score;
+          best = ord.map(p=>({x:p.x*(w/sw), y:p.y*(h/sh)}));
+        }
+      }
+      approx.delete();
+    }
+
+    // Fallback: größte Box per minAreaRect
+    if (!best){
+      let maxArea=0, maxCnt=null;
+      for (let i=0;i<contours.size();i++){
+        const a=cv.contourArea(contours.get(i)); if (a>maxArea){ maxArea=a; maxCnt=contours.get(i); }
+      }
+      if (maxCnt && maxArea>(sw*sh*0.15)){
+        const rect=cv.minAreaRect(maxCnt);
+        const box=cv.RotatedRect.points(rect);
+        const pts = [box.get(0), box.get(1), box.get(2), box.get(3)].map(p=>({x:p.x*(w/sw), y:p.y*(h/sh)}));
+        const ord=orderTLTRBRBL(pts);
+        best = ord;
+        bestScore = maxArea/(sw*sh);
+      }
+    }
+
+    edges.delete(); kernel.delete(); contours.delete(); hierarchy.delete();
+    if (best) break; // gefunden
   }
-  src.delete(); resized.delete(); gray.delete(); edges.delete(); kernel.delete(); contours.delete(); hierarchy.delete();
+
+  src.delete(); resized.delete(); gray.delete();
   return best;
 }
 
 function computeHomography(q){
   const [tl,tr,br,bl]=orderTLTRBRBL(q);
+  // Zielgröße dynamisch passend zur Quad-Aspect
+  const wTop=Math.hypot(tr.x-tl.x, tr.y-tl.y), wBot=Math.hypot(br.x-bl.x, br.y-bl.y);
+  const hL=Math.hypot(bl.x-tl.x, bl.y-tl.y), hR=Math.hypot(br.x-tr.x, br.y-tr.y);
+  const wAvg=(wTop+wBot)/2, hAvg=(hL+hR)/2;
+  const asp = clamp(wAvg/Math.max(1,hAvg), 0.7, 2.5); // 0.7..2.5
+  targetW = 1600; targetH = Math.round(targetW / asp);
+
   const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,[ tl.x,tl.y, tr.x,tr.y, br.x,br.y, bl.x,bl.y ]);
   const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,[ 0,0, targetW,0, targetW,targetH, 0,targetH ]);
   const H=cv.getPerspectiveTransform(srcTri, dstTri);
   srcTri.delete(); dstTri.delete();
   return H;
 }
-
 function warpBoard(frameCanvas, H){
   const src=cv.imread(frameCanvas), dst=new cv.Mat();
-  cv.warpPerspective(src, dst, new cv.Size(targetW,targetH), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
-  const out=document.createElement('canvas'); out.width=targetW; out.height=targetH;
-  cv.imshow(out, dst);
-  src.delete(); dst.delete();
-  return out;
+  cv.warpPerspective(src,dst,new cv.Size(targetW,targetH),cv.INTER_LINEAR,cv.BORDER_REPLICATE);
+  const out=document.createElement('canvas'); out.width=targetW; out.height=targetH; cv.imshow(out,dst);
+  src.delete(); dst.delete(); return out;
 }
 
-/* =================== Frame helpers =================== */
-function frameToCanvas(){
-  const c=document.createElement('canvas'); c.width=overlay.width; c.height=overlay.height;
-  c.getContext('2d', { willReadFrequently:true }).drawImage(video, 0, 0, c.width, c.height);
-  return c;
-}
-function grayThumb(srcCanvas, tw=128, th=72){
-  const c=document.createElement('canvas'); c.width=tw; c.height=th;
-  const x=c.getContext('2d', { willReadFrequently:true });
-  x.drawImage(srcCanvas, 0,0, tw, th);
-  const id=x.getImageData(0,0,tw,th).data;
-  const out=new Float32Array(tw*th);
-  for(let i=0,j=0;i<id.length;i+=4,j++){ out[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255; }
-  return {data:out, w:tw, h:th};
-}
+/* ===== Frame & DIFF ===== */
+function frameCanvas(){ const c=document.createElement('canvas'); c.width=overlay.width; c.height=overlay.height; c.getContext('2d',{willReadFrequently:true}).drawImage(video,0,0,c.width,c.height); return c; }
+function grayThumb(srcCanvas, tw=128, th=72){ const c=document.createElement('canvas'); c.width=tw; c.height=th; const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(srcCanvas,0,0,tw,th); const id=x.getImageData(0,0,tw,th).data; const out=new Float32Array(tw*th); for(let i=0,j=0;i<id.length;i+=4,j++){ out[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255; } return {data:out,w:tw,h:th}; }
 function mse(a,b){ if(!a||!b||a.data.length!==b.data.length) return 1; let s=0; for(let i=0;i<a.data.length;i++){ const d=a.data[i]-b.data[i]; s+=d*d; } return s/a.data.length; }
 
-/* =================== Face & OCR (lazy; UMD via <script>) =================== */
-function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.async=true; s.onload=()=>res(); s.onerror=e=>rej(e); document.head.appendChild(s); }); }
-
-let faceModel=null, faceTF=false, faceBlaze=false;
+/* ===== Face & OCR (optional, redundant CDNs) ===== */
+let faceModel=null, tfLoaded=false, blazeLoaded=false, tessLoaded=false;
 async function ensureFace(){
-  if (NO_CV) return false; // spart Netz wenn im no-cv-test
-  if (!faceTF){
-    try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); faceTF=true; }
-    catch{ try{ await loadScript('https://unpkg.com/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); faceTF=true; } catch(e){ console.warn('tf fail',e); } }
-  }
-  if (!faceBlaze){
-    try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); faceBlaze=true; }
-    catch{ try{ await loadScript('https://unpkg.com/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); faceBlaze=true; } catch(e){ console.warn('blazeface fail',e); } }
-  }
-  if (window.blazeface && !faceModel){
-    try{ faceModel = await blazeface.load(); stModels.textContent += ', BlazeFace'; }catch(e){ console.warn('blazeface.load', e); }
-  }
+  if (!tfLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); tfLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); tfLoaded=true; }catch(e){ console.warn('tf fail',e); } } }
+  if (!blazeLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch(e){ console.warn('blaze fail',e);} } }
+  if (window.blazeface && !faceModel){ try{ faceModel=await blazeface.load(); stModels.textContent+=', BlazeFace'; }catch(e){ console.warn('blazeface.load',e); } }
   return !!faceModel;
 }
-
 function triArea(a,b,c){ return Math.abs((a.x*(b.y-c.y)+b.x*(c.y-a.y)+c.x*(a.y-b.y))/2); }
-function polyArea(q){ return triArea(q[0],q[1],q[2]) + triArea(q[0],q[2],q[3]); }
+function polyArea(q){ return triArea(q[0],q[1],q[2])+triArea(q[0],q[2],q[3]); }
 function pointInQuad(p,q){ const A=polyArea(q); const s=triArea(p,q[0],q[1])+triArea(p,q[1],q[2])+triArea(p,q[2],q[3])+triArea(p,q[3],q[0]); return Math.abs(s-A)<1e-1*A; }
-
-async function faceBlockVerdict(frameCanvas){
+async function faceBlockVerdict(canvas){
   if (!tglFace.checked || !boardQuad) return false;
   try{
-    const ok = await ensureFace();
-    if (!ok) return false;
-    const preds = await faceModel.estimateFaces(frameCanvas, false);
+    const ok=await ensureFace(); if(!ok) return false;
+    const preds=await faceModel.estimateFaces(canvas,false);
     if (!preds?.length) return false;
-    for (const p of preds){
-      if (!p.topLeft || !p.bottomRight) continue;
-      const cx=(p.topLeft[0]+p.bottomRight[0])/2, cy=(p.topLeft[1]+p.bottomRight[1])/2;
-      if (pointInQuad({x:cx,y:cy}, boardQuad)) return true;
-    }
+    for (const p of preds){ if (!p.topLeft||!p.bottomRight) continue; const cx=(p.topLeft[0]+p.bottomRight[0])/2, cy=(p.topLeft[1]+p.bottomRight[1])/2; if (pointInQuad({x:cx,y:cy}, boardQuad)) return true; }
   }catch(e){ console.warn('faceBlock',e); }
   return false;
 }
+async function ensureOCR(){ if (!tessLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; }catch(e){ console.warn('tesseract fail',e); } } if (tessLoaded) stModels.textContent+=', OCR'; return tessLoaded; }
+async function runOCR(canvas){ try{ const ok=await ensureOCR(); if (!ok) return; const worker=await Tesseract.createWorker('deu'); const {data:{text}}=await worker.recognize(canvas); await worker.terminate(); console.log('OCR:', text);}catch(e){ console.warn('OCR',e); } }
 
-let tessLoaded=false;
-async function ensureOCR(){
-  if (!tessLoaded){
-    try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; }
-    catch{ try{ await loadScript('https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; } catch(e){ console.warn('tesseract fail',e); } }
-    if (tessLoaded) stModels.textContent += ', OCR';
-  }
-  return tessLoaded;
-}
-
-async function runOCR(canvas){
-  try{
-    const ok = await ensureOCR(); if (!ok) return;
-    const worker = await Tesseract.createWorker('deu');
-    const { data:{ text } } = await worker.recognize(canvas);
-    await worker.terminate();
-    console.log('OCR:', text);
-    debug('OCR fertig (Konsole)');
-  }catch(e){ console.warn('OCR',e); }
-}
-
-/* =================== Kamera =================== */
+/* ===== Kamera ===== */
 async function listCameras(){
-  const devs = await navigator.mediaDevices.enumerateDevices();
-  const cams = devs.filter(d=>d.kind==='videoinput');
-  // Bevorzuge Tele > Aux > Wide > Back
-  const score = l => { l=(l||'').toLowerCase(); let s=0;
-    if (l.includes('tele')) s-=30;
-    if (l.includes('aux')) s-=20;
-    if (l.includes('wide')) s-=10;
-    if (l.includes('ultra')) s+=5;
-    if (l.includes('front')) s+=50;
-    if (l.includes('back')||l.includes('rear')||l.includes('environment')) s-=10;
-    return s;
-  };
+  const devs=await navigator.mediaDevices.enumerateDevices();
+  const cams=devs.filter(d=>d.kind==='videoinput');
+  const score=l=>{ l=(l||'').toLowerCase(); let s=0; if (l.includes('tele')) s-=30; if (l.includes('aux')) s-=20; if (l.includes('wide')) s-=10; if (l.includes('ultra')) s+=5; if (l.includes('front')) s+=50; if (l.includes('back')||l.includes('rear')||l.includes('environment')) s-=10; return s; };
   cams.sort((a,b)=>score(a.label)-score(b.label));
-  selCam.innerHTML = '';
-  cams.forEach(c=>{ const o=document.createElement('option'); o.value=c.deviceId; o.textContent=c.label||`Kamera ${c.deviceId.slice(0,6)}`; selCam.appendChild(o); });
+  selCam.innerHTML=''; cams.forEach(c=>{ const o=document.createElement('option'); o.value=c.deviceId; o.textContent=c.label||`Kamera ${c.deviceId.slice(0,6)}`; selCam.appendChild(o); });
   selCam.disabled = cams.length===0;
 }
-
 async function startCamera(deviceId=null){
   try{
     btnStart.disabled=true;
-    if (!navigator.mediaDevices?.getUserMedia){ showBanner('getUserMedia nicht verfügbar (HTTPS/Browser prüfen)', 'bad', 7000); btnStart.disabled=false; return; }
-
-    // existierende stoppen
+    if (!navigator.mediaDevices?.getUserMedia){ showBanner('getUserMedia nicht verfügbar (HTTPS/Browser prüfen)','bad',7000); btnStart.disabled=false; return; }
     if (mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
 
-    // 1. Versuch: rückseitige Kamera mit Zielauflösung
-    let constraints = deviceId ? { video:{ deviceId:{ exact: deviceId } }, audio:false } : {
-      video: { facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:30, max:60 } }, audio:false
-    };
-
+    // Mehrstufiger Start: Back-Cam + Zielauflösung, dann Fallbacks
+    let constraints = deviceId ? { video:{ deviceId:{ exact:deviceId } }, audio:false } : { video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:30, max:60 } }, audio:false };
     try{
       mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
     }catch(e1){
-      console.warn('gUM attempt 1 failed', e1);
-      // 2. Fallback: nur facingMode
+      console.warn('gUM 1 fail', e1);
       try{
-        constraints = { video: { facingMode:{ ideal:'environment' } }, audio:false };
-        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } }, audio:false });
       }catch(e2){
-        console.warn('gUM attempt 2 failed', e2);
-        // 3. Fallback: "irgendeine" Kamera
-        constraints = { video: true, audio:false };
-        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.warn('gUM 2 fail', e2);
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false }); // irgendeine Kamera
       }
     }
 
-    video.srcObject = mediaStream;
-    await video.play().catch(()=>{});
-    track = mediaStream.getVideoTracks()[0];
-    caps = track.getCapabilities?.()||{};
-    sets = track.getSettings?.()||{};
-    hardwareZoom = 'zoom' in (caps||{});
-    if (hardwareZoom){ hwMin = caps.zoom.min??1; hwMax = caps.zoom.max??1; }
-
+    video.srcObject=mediaStream; await video.play().catch(()=>{});
+    track=mediaStream.getVideoTracks()[0]; caps=track.getCapabilities?.()||{}; sets=track.getSettings?.()||{};
+    hardwareZoom = 'zoom' in (caps||{}); if (hardwareZoom){ hwMin=caps.zoom.min??1; hwMax=caps.zoom.max??1; }
     kpiRes.textContent = `Auflösung: ${sets.width||video.videoWidth||'—'}×${sets.height||video.videoHeight||'—'}`;
+
     await listCameras();
-    btnSnap.disabled=false; zoomSlider.disabled=false;
+    selQuality.disabled=false; btnSnap.disabled=false; zoomSlider.disabled=false;
 
     await new Promise(r=> video.onloadedmetadata ? (video.onloadedmetadata=()=>r()) : setTimeout(r,150));
     resizeOverlay(); applyDisplayTransform();
 
+    // Auto: maximale Auflösung einstellen
+    if (selQuality.value==='auto') await setMaxResolution();
+    else await applyQualityPreset(selQuality.value);
+
     if (!loopRunning){ loopRunning=true; processingLoop(); }
-    showBanner('Kamera läuft', 'ok', 1500);
+    showBanner('Kamera läuft','ok',1500);
   }catch(err){
     console.error('startCamera', err);
     let msg=err.name+': '+err.message;
-    if (err.name==='NotAllowedError') msg='Kamera-Zugriff verweigert (Browser/Seiteneinstellungen prüfen)';
-    if (err.name==='NotFoundError') msg='Keine Kamera erkannt';
-    if (err.name==='NotReadableError') msg='Kamera wird von anderer App verwendet';
+    if (err.name==='NotAllowedError') msg='Kamera-Zugriff verweigert (Browser/Seiteneinstellungen)';
+    if (err.name==='NotFoundError') msg='Keine Kamera gefunden';
+    if (err.name==='NotReadableError') msg='Kamera wird von anderer App genutzt';
     if (err.name==='OverconstrainedError') msg='Geräte-Constraint nicht erfüllbar';
     showBanner('Kamera-Fehler: '+msg, 'bad', 7000);
     btnStart.disabled=false;
   }
 }
 
-function updateFps(){
-  fpsCounter.frames++;
-  const now = performance.now();
-  if (now - fpsCounter.last >= 1000){
-    kpiFps.textContent = `FPS: ${fpsCounter.frames}`;
-    fpsCounter.frames = 0; fpsCounter.last = now;
-  }
-}
+async function setMaxResolution(){
+  if (!track?.getCapabilities) return;
+  const c = track.getCapabilities();
+  const wMax = c.width?.max, hMax = c.height?.max;
+  const fpsMax = c.frameRate?.max;
+  const candidates = [];
+  if (wMax && hMax) candidates.push({width:wMax, height:hMax});
+  // Zusätzliche sinnvolle Paare in absteigender Reihenfolge
+  const presets = [
+    {width:3840,height:2160},
+    {width:2560,height:1440},
+    {width:1920,height:1080},
+    {width:1280,height:720}
+  ];
+  for (const p of presets) candidates.push(p);
 
-/* =================== Processing Loop =================== */
+  for (const cand of candidates){
+    try{
+      await track.applyConstraints({ width: { exact: cand.width }, height: { exact: cand.height }, ...(fpsMax?{ frameRate:{ ideal: Math.min(60, fpsMax) } }:{}) });
+      await new Promise(r=>setTimeout(r,120)); // settle
+      sets=track.getSettings?.()||sets;
+      kpiRes.textContent = `Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
+      return true;
+    }catch(e){
+      // next
+    }
+  }
+  return false;
+}
+async function applyQualityPreset(q){
+  if (!track) return;
+  const map = { '2160':{w:3840,h:2160}, '1440':{w:2560,h:1440}, '1080':{w:1920,h:1080}, '720':{w:1280,h:720} };
+  if (!map[q]) return;
+  try{
+    await track.applyConstraints({ width:{ ideal: map[q].w }, height:{ ideal: map[q].h }, frameRate:{ ideal: 30, max: 60 } });
+    await new Promise(r=>setTimeout(r,120));
+    sets=track.getSettings?.()||sets;
+    kpiRes.textContent = `Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
+  }catch(e){ console.warn('preset fail', e); }
+}
+on(selQuality,'change', async()=>{ if (selQuality.value==='auto') await setMaxResolution(); else await applyQualityPreset(selQuality.value); });
+
+function updateFps(){ fpsCounter.frames++; const now=performance.now(); if (now-fpsCounter.last>=1000){ kpiFps.textContent=`FPS: ${fpsCounter.frames}`; fpsCounter.frames=0; fpsCounter.last=now; }}
+
+/* ===== Processing Loop ===== */
 async function processingLoop(){
-  const cvOk = await loadOpenCV(); // versucht Redundanz-Quellen; bei Fehlschlag weiter ohne CV
+  const cvOk = await loadOpenCV(); // redundant laden; wenn fail → ohne Erkennung weiter
   let frameIdx=0, lastMotion=null; const MOTION_T=0.18, MOTION_FRAC=0.035;
+
+  // Overlay Clicks für manuellen Modus
+  on(overlay, 'click', (e)=>{
+    if (!manualMode) return;
+    const r=overlay.getBoundingClientRect();
+    const x=e.clientX - r.left, y=e.clientY - r.top;
+    manualPts.push({x,y});
+    drawManualPoints();
+    if (manualPts.length===4){
+      boardQuad = orderTLTRBRBL(manualPts);
+      boardFound = true;
+      if (H_warp) H_warp.delete();
+      H_warp = computeHomography(boardQuad);
+      manualMode=false; manualPts=[];
+      showBanner('Tafel gesetzt','ok',1500);
+    }
+  });
+
+  function drawManualPoints(){
+    ctxOv.clearRect(0,0,overlay.width,overlay.height);
+    if (manualPts.length){
+      ctxOv.fillStyle='rgba(78,161,255,0.9)';
+      manualPts.forEach(p=>{ ctxOv.beginPath(); ctxOv.arc(p.x,p.y,6,0,Math.PI*2); ctxOv.fill(); });
+      if (manualPts.length>=2){
+        ctxOv.strokeStyle='rgba(78,161,255,0.7)'; ctxOv.lineWidth=2;
+        ctxOv.beginPath(); ctxOv.moveTo(manualPts[0].x,manualPts[0].y);
+        for (let i=1;i<manualPts.length;i++) ctxOv.lineTo(manualPts[i].x,manualPts[i].y);
+        ctxOv.stroke();
+      }
+    }
+  }
 
   const step = async ()=>{
     if (!mediaStream){ loopRunning=false; return; }
@@ -501,27 +489,24 @@ async function processingLoop(){
 
     const ow=overlay.width, oh=overlay.height;
     if (ow>2 && oh>2){
-      const frame = frameToCanvas();
+      const frame = frameCanvas();
 
-      if (cvOk && !cvFailed){
+      if (cvOk && !cvFailed && !manualMode){
         try{
-          // Board-Detection alle ~10 Frames
-          if (!boardFound || (frameIdx % 10 === 0)){
-            const q = detectBoardQuad(frame, 0.5);
-            if (q){ boardQuad=q; boardFound=true; if (H_warp) H_warp.delete(); H_warp=computeHomography(boardQuad); }
+          if (!boardFound || (frameIdx%8===0)){ // öfter prüfen
+            const q = detectBoardQuad(frame);
+            if (q){ boardQuad=q; boardFound=true; if (H_warp) H_warp.delete(); H_warp = computeHomography(boardQuad); }
             else { boardFound=false; boardQuad=null; if (H_warp){ H_warp.delete(); H_warp=null; } }
           }
-
-          // Overlay zeichnen
+          // Overlay
           ctxOv.clearRect(0,0,ow,oh);
           if (boardQuad){
             ctxOv.lineWidth=3; ctxOv.strokeStyle='rgba(78,161,255,0.9)'; ctxOv.fillStyle='rgba(78,161,255,0.15)';
             ctxOv.beginPath(); ctxOv.moveTo(boardQuad[0].x,boardQuad[0].y); for(let i=1;i<4;i++) ctxOv.lineTo(boardQuad[i].x,boardQuad[i].y); ctxOv.closePath(); ctxOv.stroke(); ctxOv.fill();
           }
-          stBoard.textContent = boardFound ? 'ja' : 'nein';
-          stBoard.className = boardFound ? 'ok' : 'bad';
+          stBoard.textContent=boardFound?'ja':'nein'; stBoard.className=boardFound?'ok':'bad';
 
-          // Change + Auto nur wenn Board vorhanden
+          // Change/Auto
           if (boardFound && H_warp){
             const warped = warpBoard(frame, H_warp);
             const thumb = grayThumb(warped, 128, 72);
@@ -529,25 +514,22 @@ async function processingLoop(){
             prevThumb = thumb;
 
             if (!lastMotion) lastMotion = grayThumb(warped, 128, 72);
-            const curM = grayThumb(warped, 128, 72);
-            let changes=0; for(let i=0;i<curM.data.length;i++) if (Math.abs(curM.data[i]-lastMotion.data[i])>MOTION_T) changes++;
-            const frac = changes / curM.data.length;
+            const cur = grayThumb(warped, 128, 72);
+            let changes=0; for (let i=0;i<cur.data.length;i++){ if (Math.abs(cur.data[i]-lastMotion.data[i])>MOTION_T) changes++; }
+            const frac = changes / cur.data.length;
             const motionBlock = frac > MOTION_FRAC;
-            lastMotion = curM;
+            lastMotion = cur;
 
             stDiff.textContent = (diffVal!==null)?fmt(diffVal,3):'—';
-            stBlock.textContent = tglBlocker.checked ? (motionBlock?'blockiert':'frei') : 'aus';
-            stBlock.className = tglBlocker.checked ? (motionBlock?'bad':'ok') : 'warn';
+            stBlock.textContent = tglBlocker.checked ? (motionBlock ? 'blockiert':'frei') : 'aus';
+            stBlock.className = tglBlocker.checked ? (motionBlock ? 'bad':'ok') : 'warn';
 
             const now=performance.now();
             const stable=(now - lastChangeTs) > STABLE_MS;
-            // Marker bei erkannter Änderung (informativ)
             if (tglBoardChange.checked && diffVal!==null && diffVal>CHANGE_THRESH && stable){
               lastChangeTs = now;
-              debug(`Folien: Änderung (diff=${fmt(diffVal,3)})`);
             }
 
-            // Auto Capture
             if (tglAuto.checked && tglBoardChange.checked && diffVal!==null && diffVal>CHANGE_THRESH && stable){
               const cooldown=(now - (processingLoop._lastCap||0)) > COOLDOWN_MS;
               const blockOk = tglBlocker.checked ? !motionBlock : true;
@@ -558,40 +540,33 @@ async function processingLoop(){
               }
             }
           } else {
-            ctxOv.clearRect(0,0,ow,oh);
-            stDiff.textContent='—';
+            ctxOv.clearRect(0,0,ow,oh); stDiff.textContent='—';
           }
         }catch(e){
-          // Wenn OpenCV crasht → App bleibt an, nur ohne Erkennung
-          console.error('processing (cv) error', e);
+          console.error('processing cv error', e);
           stModels.textContent='(ohne OpenCV)';
-          showBanner('Erkennung deaktiviert (OpenCV-Fehler)', 'warn', 5000);
           cvFailed=true; boardFound=false; boardQuad=null; if (H_warp){ H_warp.delete(); H_warp=null; }
           ctxOv.clearRect(0,0,ow,oh);
         }
-      } else {
-        // Kein CV: Live & Capture möglich
-        ctxOv.clearRect(0,0,ow,oh);
-        stBoard.textContent='nein'; stBoard.className='bad';
-        stDiff.textContent='—';
+      } else if (!manualMode) {
+        // Kein CV aktiv
+        ctxOv.clearRect(0,0,ow,oh); stBoard.textContent='nein'; stBoard.className='bad'; stDiff.textContent='—';
       }
     }
-
-    frameIdx++;
-    requestAnimationFrame(step);
+    frameIdx++; requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
 }
 
-/* =================== Capture =================== */
+/* ===== Capture ===== */
 async function captureAndSave(prefix='Tafel'){
   try{
     let out=null;
     if (boardFound && H_warp && cvReady && !cvFailed){
-      const frame=frameToCanvas();
+      const frame=frameCanvas();
       out = warpBoard(frame, H_warp);
     } else {
-      out = frameToCanvas();
+      out = frameCanvas();
     }
     const blob = await new Promise(res=> out.toBlob(res, 'image/png', 0.95));
     const r = await saveImage(blob, prefix);
@@ -600,56 +575,41 @@ async function captureAndSave(prefix='Tafel'){
   }catch(e){ console.error('capture', e); showBanner('Fehler beim Speichern', 'bad', 4000); }
 }
 
-/* =================== Events & Init =================== */
-function persistToggles(){
-  const cur = loadCfg();
-  saveCfg({
-    ...cur,
-    tglBoardChange: tglBoardChange.checked,
-    tglAuto: tglAuto.checked,
-    tglBlocker: tglBlocker.checked,
-    tglFace: tglFace.checked,
-    tglOCR: tglOCR.checked
-  });
-}
-[tglBoardChange, tglAuto, tglBlocker, tglFace, tglOCR].forEach(el => on(el, 'change', persistToggles));
+/* ===== Events & Init ===== */
+function persist(){ const c=loadCfg(); saveCfg({ ...c, tglBoardChange: tglBoardChange.checked, tglAuto: tglAuto.checked, tglBlocker: tglBlocker.checked, tglFace: tglFace.checked, tglOCR: tglOCR.checked }); }
+[tglBoardChange,tglAuto,tglBlocker,tglFace,tglOCR].forEach(el=>on(el,'change',persist));
+on(btnStart,'click',()=>startCamera());
+on(selCam,'change',()=>startCamera(selCam.value));
+on(btnSnap,'click',()=>captureAndSave('Manuell'));
+on(btnDir,'click',chooseDirectory);
+on(tglAuto,'change',()=>{ stAuto.textContent=tglAuto.checked?'an':'aus'; stAuto.className=tglAuto.checked?'ok':'warn'; });
 
-on(btnStart, 'click', () => startCamera());
-on(selCam, 'change', () => startCamera(selCam.value));
-on(btnSnap, 'click', () => captureAndSave('Manuell'));
-on(btnDir, 'click', chooseDirectory);
-on(tglAuto, 'change', () => { stAuto.textContent = tglAuto.checked ? 'an' : 'aus'; stAuto.className = tglAuto.checked ? 'ok' : 'warn'; });
+on(btnManualBoard,'click',()=>{
+  manualMode = true; manualPts=[]; showBanner('Manuell: tippe 4 Ecken im Bild (tl→tr→br→bl)','warn',5000);
+  ctxOv.clearRect(0,0,overlay.width,overlay.height);
+});
+on(btnResetBoard,'click',()=>{
+  manualMode=false; manualPts=[]; boardFound=false; boardQuad=null; if (H_warp){ H_warp.delete(); H_warp=null; }
+  ctxOv.clearRect(0,0,overlay.width,overlay.height);
+  showBanner('Board-Erkennung zurückgesetzt','ok',1200);
+});
 
-on(document, 'keydown', (e)=>{
-  if (e.key.toLowerCase()==='d'){ SHOW_DEBUG=!SHOW_DEBUG; debug('Debug an'); }
-  if (e.key.toLowerCase()==='c'){ captureAndSave('Manuell'); }
+on(document,'keydown',(e)=>{
+  if (e.key.toLowerCase()==='c') captureAndSave('Manuell');
   if (e.key==='+'){ const z=clamp(parseFloat(zoomSlider.value)+0.1,1,10); zoomSlider.value=z; applyZoom(z); }
   if (e.key==='-'){ const z=clamp(parseFloat(zoomSlider.value)-0.1,1,10); zoomSlider.value=z; applyZoom(z); }
 });
 
 (async function init(){
-  try{
-    // Toggles laden
-    const cfg = loadCfg();
-    [['tglBoardChange', tglBoardChange],['tglAuto', tglAuto],['tglBlocker', tglBlocker],['tglFace', tglFace],['tglOCR', tglOCR]].forEach(([k,el])=>{
-      if (cfg[k] !== undefined) el.checked = cfg[k];
-    });
-    stAuto.textContent = tglAuto.checked ? 'an' : 'aus';
-    stAuto.className = tglAuto.checked ? 'ok' : 'warn';
-
-    saveMode.innerHTML = haveFSAccess ? 'Speichern: <b>Download / Ordner</b>' : 'Speichern: <b>Download</b>';
-    zoomInfo.textContent = `Anzeige ${fmt(displayZoom,2)}× | HW —`;
-
-    // Voraus: Cams auflisten (Labels erst nach Permission sichtbar)
-    try { await listCameras(); } catch {}
-
-    // OpenCV (nicht-blockierend) vorwärmen
-    loadOpenCV();
-
-  }catch(e){
-    console.error('init', e);
-    showBanner('Init-Fehler: '+(e.message||e), 'bad', 6000);
-  }
+  const cfg = loadCfg();
+  [['tglBoardChange', tglBoardChange],['tglAuto', tglAuto],['tglBlocker', tglBlocker],['tglFace', tglFace],['tglOCR', tglOCR]]
+    .forEach(([k,el])=>{ if (cfg[k]!==undefined) el.checked=cfg[k]; });
+  stAuto.textContent = tglAuto.checked ? 'an' : 'aus'; stAuto.className = tglAuto.checked ? 'ok' : 'warn';
+  saveMode.innerHTML = haveFSAccess ? 'Speichern: <b>Download / Ordner</b>' : 'Speichern: <b>Download</b>';
+  zoomInfo.textContent = `Anzeige ${fmt(displayZoom,2)}× | HW —`;
+  try{ await listCameras(); }catch{}
+  // OpenCV vorwärmen (nicht-blockierend)
+  loadOpenCV();
 })();
 </script>
 </body>

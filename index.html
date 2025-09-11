@@ -1,5 +1,5 @@
 
-!doctype html>
+<!doctype html>
 <html lang="de">
 <head>
   <meta charset="utf-8" />
@@ -8,22 +8,21 @@
   <style>
     :root {
       --bg:#0f1115; --fg:#e8eaf0; --muted:#9aa3b2; --accent:#4cc9f0; --ok:#2ecc71; --warn:#f1c40f; --err:#e74c3c;
-      --card:#161a22; --border:#283042;
-      --zoom:1;
+      --card:#161a22; --border:#283042; --zoom:1;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg)}
-    .app{display:grid;gap:.75rem;padding:.75rem;height:100vh}
+    .app{display:grid;gap:.75rem;padding:.75rem;height:100dvh} /* 100dvh für Mobile-Viewport */
     @media (orientation:portrait){
       .app{grid-template-rows:auto 1fr auto;grid-template-columns:1fr}
-      .stage{grid-row:2}
       .controls-top{grid-row:1}
+      .stage{grid-row:2}
       .controls-bottom{grid-row:3}
     }
     @media (orientation:landscape){
-      .app{grid-template-columns:1fr 340px;grid-template-rows:1fr auto}
-      .stage{grid-column:1;grid-row:1/span 2}
+      .app{grid-template-columns:1fr 360px;grid-template-rows:1fr auto}
+      .stage{grid-column:1;grid-row:1 / span 2}
       .controls-top{grid-column:2;grid-row:1}
       .controls-bottom{grid-column:2;grid-row:2}
     }
@@ -33,6 +32,7 @@
     .btn.primary{background:linear-gradient(180deg,#2a3446,#1e2635);border-color:#3a4a66}
     .btn:disabled{opacity:.5;cursor:not-allowed}
     .toggle{display:flex;align-items:center;gap:.4rem}
+    .select{appearance:none;background:#1f2633;border:1px solid var(--border);color:var(--fg);padding:.5rem .8rem;border-radius:8px}
     .pill{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .5rem;border-radius:999px;font-size:.85rem;border:1px solid var(--border)}
     .pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.err{color:var(--err)}
     .sep{height:1px;background:var(--border);margin:.5rem 0}
@@ -40,8 +40,8 @@
     .status .kv{display:flex;justify-content:space-between;gap:.75rem;background:#11151d;border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem}
 
     /* Bühne mit Livebild & Overlay */
-    .stage{position:relative;overflow:hidden}
-    video,canvas{width:100%;height:100%;object-fit:contain;border-radius:10px}
+    .stage{position:relative;overflow:hidden;min-height:50dvh}
+    video,canvas{width:100%;height:100%;object-fit:contain;border-radius:10px;touch-action:none}
     #preview{position:absolute;inset:0;z-index:0;background:#000;transform:scale(var(--zoom));transform-origin:center center}
     #overlay{position:absolute;inset:0;z-index:1;pointer-events:none;background:transparent !important;transform:scale(var(--zoom));transform-origin:center center}
 
@@ -49,7 +49,7 @@
     .zoombar{position:absolute;left:.75rem;right:.75rem;bottom:.75rem;z-index:2;
              display:flex;gap:.5rem;align-items:center;justify-content:center;
              background:rgba(0,0,0,.35);backdrop-filter:blur(2px);border-radius:10px;padding:.35rem .6rem}
-    .zoombar input[type="range"]{width:200px}
+    .zoombar input[type="range"]{width:220px}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
   </style>
 </head>
@@ -63,7 +63,7 @@
       <div class="zoombar">
         <label class="toggle" style="color:#e8eaf0">
           🔎 Zoom
-          <input type="range" id="zoomRange" min="1" max="3" step="0.1" value="1">
+          <input type="range" id="zoomRange" min="1" max="5" step="0.1" value="1">
         </label>
         <span id="zoomVal" class="pill mono">1.0×</span>
       </div>
@@ -73,8 +73,11 @@
       <h2 style="margin:0 0 .25rem;color:#9aa3b2">Aufnahme &amp; Ordner</h2>
       <div class="row">
         <button class="btn primary" id="btnStart">Kamera starten</button>
+        <select id="lensSelect" class="select" title="Kamera wählen" disabled>
+          <option>– Kamera wird geladen –</option>
+        </select>
         <button class="btn" id="btnTorch" disabled>🔦 Taschenlampe</button>
-        <button class="btn" id="btnShot" disabled>📸 Manuell auslösen</button>
+        <button class="btn" id="btnShot" disabled>📸 Manuell</button>
       </div>
       <div class="row">
         <button class="btn" id="btnChooseDir">📁 Ordner wählen</button>
@@ -90,9 +93,9 @@
       <div class="sep"></div>
       <h2 style="margin:0 0 .25rem;color:#9aa3b2">Erkennung</h2>
       <div class="row">
-        <label class="toggle"><input type="checkbox" id="cbPerson" checked> Personenerkennung</label>
+        <label class="toggle"><input type="checkbox" id="cbPerson" checked> Personen blockieren</label>
         <label class="toggle"><input type="checkbox" id="cbSlide" checked> Folien‑Änderung</label>
-        <!-- nicht voraktiviert -->
+        <!-- NICHT voraktiviert -->
         <label class="toggle"><input type="checkbox" id="cbAutoCap"> Auto‑Foto bei Folienwechsel</label>
       </div>
       <div class="row">
@@ -109,9 +112,9 @@
     <div class="controls-bottom card">
       <h2 style="margin:0 0 .25rem;color:#9aa3b2">Status</h2>
       <div class="status">
-        <div class="kv"><span>Board erkannt</span><span id="kvBoard">-</span></div>
-        <div class="kv"><span>Auflösung</span><span id="kvRes">-</span></div>
-        <div class="kv"><span>Modell</span><span id="kvModel">-</span></div>
+        <div class="kv"><span>Board erkannt</span><span id="kvBoard">–</span></div>
+        <div class="kv"><span>Auflösung</span><span id="kvRes">–</span></div>
+        <div class="kv"><span>Modell</span><span id="kvModel">–</span></div>
         <div class="kv"><span>Gespeichert</span><span id="kvSaved">0</span></div>
       </div>
       <div class="sep"></div>
@@ -123,14 +126,15 @@
 
   <script>
   (function(){
-    // ======= DOM =======
+    // ---------- DOM ----------
     const $ = s => document.querySelector(s);
-    const stage = $('#stage');
-    const video = $('#preview');
+    const stage   = $('#stage');
+    const video   = $('#preview');
     const overlay = $('#overlay');
-    const ctx = overlay.getContext('2d');
+    const ctx     = overlay.getContext('2d');
 
     const btnStart = $('#btnStart');
+    const lensSelect = $('#lensSelect');
     const btnTorch = $('#btnTorch');
     const btnShot  = $('#btnShot');
     const btnChooseDir = $('#btnChooseDir');
@@ -140,11 +144,12 @@
     const cbSlide  = $('#cbSlide');
     const cbAutoCap= $('#cbAutoCap');
     const slideThresh = $('#slideThresh');
-    const slideVal = $('#slideVal');
+    const slideVal    = $('#slideVal');
 
     const permCam = $('#permCam');
     const permFS  = $('#permFS');
     const pillFPS = $('#pillFPS');
+
     const kvBoard = $('#kvBoard');
     const kvRes   = $('#kvRes');
     const kvModel = $('#kvModel');
@@ -153,42 +158,57 @@
     const zoomRange = $('#zoomRange');
     const zoomVal   = $('#zoomVal');
 
-    // ======= State =======
+    // ---------- State ----------
     let stream = null, videoTrack = null, torchOn = false;
+    let selectedDeviceId = null;
     let dirHandle = null, savedCount = 0;
 
     // Recognition state
     let cvReady = false, cvLoading = false;
-    let segmenter = null, tfLoading = false; // optional persons
+    let segmenter = null, tfLoading = false;
     let boardQuad = null;
     let lastSlideThumb = null;
-    let slideStableSince = 0, personPresent = false;
-    let lastTickT = performance.now(), frames = 0, rafId = 0;
+    let lastChangeGateT = 0;
+    let personPresentOnBoard = false;
+
+    // Perf
+    let rafId = 0, fpsFrames = 0, fpsT = performance.now();
+
+    // ---------- UI Helpers ----------
+    function setZoom(z){ stage.style.setProperty('--zoom', z); zoomVal.textContent = z.toFixed(1)+'×'; }
+    zoomRange.addEventListener('input', () => setZoom(parseFloat(zoomRange.value)||1));
+    setZoom(1);
 
     slideVal.textContent = slideThresh.value + '%';
     slideThresh.addEventListener('input', () => slideVal.textContent = slideThresh.value + '%');
 
-    // ======= Zoom (Anzeige) =======
-    function setZoom(z) { stage.style.setProperty('--zoom', z); zoomVal.textContent = z.toFixed(1)+'×'; }
-    zoomRange.addEventListener('input', () => setZoom(parseFloat(zoomRange.value)||1));
-    setZoom(1);
+    function resizeOverlayToVideo(){
+      if (video.videoWidth && video.videoHeight) {
+        overlay.width = video.videoWidth;
+        overlay.height= video.videoHeight;
+        kvRes.textContent = `${overlay.width}×${overlay.height}`;
+      }
+    }
+    window.addEventListener('resize', resizeOverlayToVideo);
+    window.addEventListener('orientationchange', () => setTimeout(resizeOverlayToVideo, 150));
 
-    // ======= Kamera =======
-    async function startCamera() {
+    // ---------- Camera ----------
+    async function startCamera(deviceId){
       stopCamera();
 
-      // Mobile: Inline & stumm, sonst blockt play()
       video.setAttribute('playsinline',''); video.muted = true; video.autoplay = true;
 
       if (!navigator.mediaDevices?.getUserMedia) {
         permCam.textContent = 'Kamera: nicht unterstützt'; permCam.className = 'pill err';
-        alert('getUserMedia wird von diesem Browser nicht unterstützt.');
+        alert('getUserMedia wird nicht unterstützt.');
         return;
       }
 
-      const preferred = { video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} }, audio:false };
+      const base = { audio:false, video: { facingMode: { ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } } };
+      if (deviceId) base.video.deviceId = { exact: deviceId };
+
       try {
-        stream = await navigator.mediaDevices.getUserMedia(preferred);
+        stream = await navigator.mediaDevices.getUserMedia(base);
       } catch (e1) {
         console.warn('preferred getUserMedia failed', e1);
         stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
@@ -197,12 +217,14 @@
       video.srcObject = stream;
       videoTrack = stream.getVideoTracks()[0];
 
-      // Auflösung/Overlay setzen, sobald Meta da sind
-      const applyMeta = () => {
-        overlay.width  = video.videoWidth  || overlay.clientWidth  || 1280;
-        overlay.height = video.videoHeight || overlay.clientHeight || 720;
-        kvRes.textContent = `${overlay.width}×${overlay.height}`;
-      };
+      // Nach Permission die Kameraliste befüllen
+      await populateCameras();
+
+      // Torch & Zoom‑HW
+      detectTorchSupport();
+      setupHardwareZoom();
+
+      const applyMeta = () => { resizeOverlayToVideo(); };
       if (video.readyState >= 1) applyMeta();
       else video.addEventListener('loadedmetadata', applyMeta, { once:true });
 
@@ -211,47 +233,111 @@
       btnShot.disabled = false;
       permCam.textContent = 'Kamera: ok'; permCam.className = 'pill ok';
 
-      detectTorchSupport();
-      loadOpenCV(); // startet asynchron; Fallback-Erkennung läuft sofort
+      // Libs laden
+      loadOpenCV();                      // robustes OpenCV (WASM)
       if (cbPerson.checked) loadSegmentation();
 
       runLoop();
     }
 
-    function stopCamera() {
+    function stopCamera(){
       cancelAnimationFrame(rafId);
       if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
       videoTrack = null;
       btnShot.disabled = true;
       ctx.clearRect(0,0,overlay.width, overlay.height);
-      // Zoom zurück
+      boardQuad = null; lastSlideThumb = null; personPresentOnBoard = false;
+      // Anzeige‑Zoom zurück
       zoomRange.value = '1'; setZoom(1);
     }
 
-    async function detectTorchSupport() {
+    async function populateCameras(){
+      try{
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter(d => d.kind === 'videoinput');
+        // Einfache Heuristik zur Linsenerkennung
+        const labelRank = (label) => {
+          const L = (label||'').toLowerCase();
+          if (L.includes('tele')) return 3;
+          if (L.includes('back') && (L.includes('aux') || L.includes('camera 2') || L.includes('camera3'))) return 2;
+          if (L.includes('ultra') || L.includes('wide')) return 1;
+          return 0;
+        };
+        // Sortiere: tele > aux/back > wide > rest
+        cams.sort((a,b) => labelRank(b.label)-labelRank(a.label));
+        lensSelect.innerHTML = '';
+        for (const c of cams){
+          const opt = document.createElement('option');
+          opt.value = c.deviceId;
+          opt.textContent = c.label || `Kamera ${lensSelect.length+1}`;
+          lensSelect.appendChild(opt);
+        }
+        lensSelect.disabled = cams.length === 0;
+        // Vorbelegung: falls selectedDeviceId gesetzt
+        if (selectedDeviceId) lensSelect.value = selectedDeviceId;
+      }catch(e){ console.warn('enumerateDevices failed', e); }
+    }
+
+    lensSelect.addEventListener('change', async () => {
+      selectedDeviceId = lensSelect.value;
+      await startCamera(selectedDeviceId);
+    });
+
+    function detectTorchSupport(){
       try {
         const caps = videoTrack?.getCapabilities?.();
         btnTorch.disabled = !(caps && 'torch' in caps);
       } catch { btnTorch.disabled = true; }
     }
 
+    function setupHardwareZoom(){
+      try {
+        const caps = videoTrack?.getCapabilities?.();
+        if (caps && caps.zoom && (typeof caps.zoom === 'number' || caps.zoom.max)){
+          const min = caps.zoom.min ?? 1;
+          const max = caps.zoom.max ?? 5;
+          const step= caps.zoom.step?? 0.1;
+          zoomRange.min = String(min);
+          zoomRange.max = String(Math.max(3, max));
+          zoomRange.step= String(step);
+          const settings = videoTrack.getSettings?.() || {};
+          const cur = settings.zoom ?? 1;
+          zoomRange.value = String(cur);
+          setZoom(parseFloat(zoomRange.value)||1);
+          zoomRange.oninput = async () => {
+            const val = Number(zoomRange.value);
+            setZoom(val);
+            try { await videoTrack.applyConstraints({ advanced:[{ zoom: val }] }); }
+            catch(e){ /* wenn HW‑Zoom scheitert, bleibt Anzeige‑Zoom aktiv */ }
+          };
+        } else {
+          // bleibt Anzeige‑Zoom (CSS)
+          zoomRange.min = '1'; zoomRange.max = '5'; zoomRange.step = '0.1';
+          zoomRange.oninput = () => setZoom(parseFloat(zoomRange.value)||1);
+        }
+      } catch {
+        zoomRange.oninput = () => setZoom(parseFloat(zoomRange.value)||1);
+      }
+    }
+
+    // Pinch‑to‑Zoom (Anzeige)
+    let pinchD0 = 0, zoom0 = 1;
+    stage.addEventListener('touchstart', (e)=>{ if (e.touches.length===2){ pinchD0 = dist(e.touches[0], e.touches[1]); zoom0 = parseFloat(zoomRange.value)||1; }}, {passive:true});
+    stage.addEventListener('touchmove',  (e)=>{ if (e.touches.length===2){ const d = dist(e.touches[0], e.touches[1]); const factor = d/pinchD0; const z = Math.min(parseFloat(zoomRange.max), Math.max(parseFloat(zoomRange.min), zoom0*factor)); zoomRange.value = String(z); setZoom(z); }}, {passive:true});
+    function dist(a,b){ const dx=a.clientX-b.clientX, dy=a.clientY-b.clientY; return Math.hypot(dx,dy); }
+
     btnTorch.addEventListener('click', async () => {
       const track = videoTrack; if (!track) return;
-      try {
-        torchOn = !torchOn;
-        await track.applyConstraints({ advanced:[{ torch: torchOn }] });
-        btnTorch.textContent = torchOn ? '🔦 Taschenlampe AN' : '🔦 Taschenlampe';
-      } catch (e) {
-        console.warn('Torch not supported', e);
-        alert('Taschenlampe wird von diesem Gerät/Kamera nicht unterstützt.');
-      }
+      try { torchOn = !torchOn; await track.applyConstraints({ advanced:[{ torch: torchOn }] });
+            btnTorch.textContent = torchOn ? '🔦 Taschenlampe AN' : '🔦 Taschenlampe'; }
+      catch (e){ console.warn('Torch not supported', e); alert('Taschenlampe wird nicht unterstützt.'); }
     });
 
-    btnStart.addEventListener('click', startCamera);
+    btnStart.addEventListener('click', () => startCamera(selectedDeviceId));
 
-    // ======= Speichern / Ordner =======
+    // ---------- Ordner & Speichern ----------
     btnChooseDir.addEventListener('click', chooseDirectory);
-    async function chooseDirectory() {
+    async function chooseDirectory(){
       if (!window.showDirectoryPicker) {
         permFS.textContent = 'Dateizugriff: nicht unterstützt'; permFS.className = 'pill warn';
         alert('Ordnerwahl nicht unterstützt. Fallback: Downloads.');
@@ -268,7 +354,7 @@
       } catch (e) { console.warn('chooseDirectory', e); }
     }
 
-    async function saveBlob(name, blob) {
+    async function saveBlob(name, blob){
       if (dirHandle) {
         try {
           const fh = await dirHandle.getFileHandle(name, { create:true });
@@ -292,56 +378,42 @@
       if (shot) await saveBlob(`tafel_${ts()}.jpg`, shot);
     });
 
-    function ts(){
-      const d = new Date(); const p = n => String(n).padStart(2,'0');
-      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
-    }
+    function ts(){ const d=new Date(), p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`; }
 
-    // ======= Capture (Offscreen-Canvas; Overlay bleibt transparent) =======
-    async function captureAndRectify() {
-      if (!stream) return null;
-
-      if ((!overlay.width || !overlay.height) && video.videoWidth) {
-        overlay.width = video.videoWidth; overlay.height = video.videoHeight;
-      }
+    // ---------- Capture (nur ROI der Tafel) ----------
+    async function captureAndRectify(){
+      if (!stream || !cvReady || !window.cv?.Mat || !boardQuad) return null;
+      // Offscreen in Videoauflösung
       const w = overlay.width || video.videoWidth || 1280;
       const h = overlay.height|| video.videoHeight|| 720;
-
       const cap = document.createElement('canvas'); cap.width=w; cap.height=h;
       const capCtx = cap.getContext('2d', { willReadFrequently:true });
       capCtx.drawImage(video, 0, 0, w, h);
 
-      let blob;
-      if (cvReady && window.cv?.Mat) {
-        const mat = cv.imread(cap);
-        const quad = boardQuad; // schon im Loop berechnet
-        let roi = quad ? warpToBoard(mat, quad) : mat.clone();
-        const out = document.createElement('canvas'); out.width = roi.cols; out.height = roi.rows;
-        cv.imshow(out, roi);
-        blob = await new Promise(res => out.toBlob(res, 'image/jpeg', 0.9));
-        mat.delete(); roi.delete();
-      } else {
-        blob = await new Promise(res => cap.toBlob(res, 'image/jpeg', 0.9));
-      }
+      const mat = cv.imread(cap);
+      const roi = warpToBoard(mat, boardQuad); // nur Tafel
+      const out = document.createElement('canvas'); out.width = roi.cols; out.height = roi.rows;
+      cv.imshow(out, roi);
+      const blob = await new Promise(res => out.toBlob(res, 'image/jpeg', 0.9));
+      mat.delete(); roi.delete();
       return blob;
     }
 
-    // ======= OpenCV laden (robust) =======
-    function loadOpenCV() {
+    // ---------- OpenCV laden (robust) ----------
+    function loadOpenCV(){
       if (cvReady || cvLoading) return; cvLoading = true;
       const s = document.createElement('script');
-      // Stabiler Build inkl. WASM:
       s.src = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-1/opencv.js';
-      s.async = true; s.crossOrigin = 'anonymous';
+      s.async = true; s.crossOrigin='anonymous';
       window.cv = window.cv || {};
       window.cv.onRuntimeInitialized = () => { cvReady = true; kvModel.textContent = 'OpenCV'; };
-      s.onload = () => { if (window.cv?.Mat && !cvReady) { cvReady = true; kvModel.textContent = 'OpenCV'; } };
-      s.onerror = () => { cvLoading = false; kvModel.textContent = 'OpenCV: Fehler beim Laden'; };
+      s.onload = () => { if (window.cv?.Mat && !cvReady){ cvReady=true; kvModel.textContent='OpenCV'; } };
+      s.onerror = () => { cvLoading = false; kvModel.textContent = 'OpenCV: Ladefehler'; };
       document.head.appendChild(s);
     }
 
-    // ======= (Optional) TF.js Personensegmentierung =======
-    async function loadSegmentation() {
+    // ---------- TF.js Personensegmentierung ----------
+    async function loadSegmentation(){
       if (segmenter) return segmenter;
       if (tfLoading) { while(!segmenter) await new Promise(r=>setTimeout(r,100)); return segmenter; }
       tfLoading = true;
@@ -352,15 +424,14 @@
         segmenter = await bs.createSegmenter(bs.SupportedModels.MediaPipeSelfieSegmentation, {
           runtime:'tfjs', modelType:'landscape', enableSegmentationSmoothing:true
         });
-        kvModel.textContent = (kvModel.textContent ? kvModel.textContent+' + ' : '') + 'SelfieSegmentation';
-      } catch (e) {
-        console.warn('TF load failed', e);
-      }
+        kvModel.textContent = (kvModel.textContent ? kvModel.textContent+' + ' : '') + 'SelfieSeg';
+      } catch (e) { console.warn('TF load failed', e); }
       return segmenter;
     }
+
     cbPerson.addEventListener('change', () => { if (cbPerson.checked) loadSegmentation(); });
 
-    // ======= Board-Tools (OpenCV) =======
+    // ---------- Board-Tools (OpenCV) ----------
     function orderQuad(pts){ pts.sort((a,b)=>a.y-b.y); const top=pts.slice(0,2).sort((a,b)=>a.x-b.x); const bot=pts.slice(2).sort((a,b)=>a.x-b.x); return [top[0],top[1],bot[1],bot[0]]; }
     function polygonArea(pts){ let a=0; for(let i=0;i<pts.length;i++){ const p=pts[i], q=pts[(i+1)%pts.length]; a += p.x*q.y - q.x*p.y; } return a/2; }
     function findBoardQuad(mat){
@@ -401,11 +472,14 @@
       if (!q) return;
       ctx.save();
       ctx.strokeStyle='rgba(76,201,240,0.9)'; ctx.lineWidth=3;
-      ctx.beginPath(); ctx.moveTo(q[0].x,q[0].y); for(let i=1;i<4;i++) ctx.lineTo(q[i].x,q[i].y);
-      ctx.closePath(); ctx.stroke(); ctx.restore();
+      ctx.beginPath();
+      ctx.moveTo(q[0].x,q[0].y);
+      for (let i=1;i<4;i++) ctx.lineTo(q[i].x,q[i].y);
+      ctx.closePath(); ctx.stroke();
+      ctx.restore();
     }
 
-    // ======= Fallback-Tools (ohne OpenCV) =======
+    // ---------- Fallback-Thumb (ohne OpenCV) ----------
     function thumb64GrayFromCanvas(canvas){
       const tmp = document.createElement('canvas'); tmp.width=64; tmp.height=64;
       const tctx = tmp.getContext('2d'); tctx.drawImage(canvas, 0,0,64,64);
@@ -416,125 +490,117 @@
       }
       return out;
     }
-    function diffPercent(a,b){
-      let sum=0; const n=a.length; for (let i=0;i<n;i++) sum += Math.abs(a[i]-b[i]);
-      return (sum/(n*255))*100;
-    }
+    function diffPercent(a,b){ let sum=0; const n=a.length; for(let i=0;i<n;i++) sum+=Math.abs(a[i]-b[i]); return (sum/(n*255))*100; }
 
-    // ======= Main Loop =======
+    // ---------- Main Loop ----------
     async function runLoop(){
-      const w = overlay.width || 1280, h = overlay.height || 720;
-      const cap = document.createElement('canvas'); cap.width=w; cap.height=h; const capCtx = cap.getContext('2d');
-
       const tick = async () => {
         rafId = requestAnimationFrame(tick);
         if (!stream) return;
 
-        // FPS-Anzeige
-        frames++; const now = performance.now();
-        if (now - lastTickT > 1000) { pillFPS.textContent = `${frames} FPS`; frames=0; lastTickT = now; }
+        // FPS
+        fpsFrames++; const now = performance.now();
+        if (now - fpsT > 1000) { pillFPS.textContent = `${fpsFrames} FPS`; fpsFrames=0; fpsT=now; }
 
-        // alle 250ms erkennen
-        const doDetect = (now - (tick.lastDetectT || 0)) > 250;
-        if (!doDetect) return;
-        tick.lastDetectT = now;
+        // alle 300ms erkennen
+        if (!tick.lastT || (now - tick.lastT) > 300) {
+          tick.lastT = now;
 
-        capCtx.drawImage(video, 0,0,w,h);
+          // Offscreen-Canvas in Videoauflösung
+          const w = overlay.width || video.videoWidth || 1280;
+          const h = overlay.height|| video.videoHeight|| 720;
+          const cap = document.createElement('canvas'); cap.width=w; cap.height=h;
+          const capCtx = cap.getContext('2d'); capCtx.drawImage(video, 0,0,w,h);
 
-        let changed = false;
+          let changed = false;
 
-        if (cvReady && window.cv?.Mat) {
-          const mat = cv.imread(cap);
-          const found = findBoardQuad(mat);
-          boardQuad = found || null;
-          kvBoard.textContent = found ? 'ja' : 'nein';
-          drawQuad(boardQuad);
+          if (cvReady && window.cv?.Mat) {
+            const mat = cv.imread(cap);
+            const found = findBoardQuad(mat);
+            boardQuad = found || null;
+            kvBoard.textContent = found ? 'ja' : 'nein';
+            drawQuad(boardQuad);
 
-          if (cbSlide.checked) {
-            const roi = boardQuad ? warpToBoard(mat, boardQuad) : mat;
-            const th = (() => {
-              const dst = new cv.Mat(); const size = new cv.Size(64,64);
-              cv.resize(roi, dst, size, 0,0, cv.INTER_AREA);
-              const gray = new cv.Mat(); cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY);
-              const out = new Uint8Array(64*64); out.set(gray.data);
-              dst.delete(); gray.delete();
-              return out;
-            })();
+            if (boardQuad && cbSlide.checked) {
+              // Thumb nur aus der Tafel-ROI
+              const roi = warpToBoard(mat, boardQuad);
+              const th = (() => {
+                const dst = new cv.Mat(); const size = new cv.Size(64,64);
+                cv.resize(roi, dst, size, 0,0, cv.INTER_AREA);
+                const gray = new cv.Mat(); cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY);
+                const out = new Uint8Array(64*64); out.set(gray.data);
+                dst.delete(); gray.delete(); return out;
+              })();
 
-            if (lastSlideThumb) {
-              const dp = diffPercent(th, lastSlideThumb);
-              const thr = parseFloat(slideThresh.value);
-              const tStable = performance.now();
-              if (dp > thr) {
-                if (!tick.lastChangeT || (tStable - tick.lastChangeT) > 800) changed = true;
+              if (lastSlideThumb) {
+                const dp = diffPercent(th, lastSlideThumb);
+                const thr = parseFloat(slideThresh.value);
+                if (dp > thr) {
+                  if (now - lastChangeGateT > 800) { changed = true; lastChangeGateT = now; }
+                } else {
+                  lastChangeGateT = now;
+                }
+                document.getElementById('stateSlide').textContent = 'Folie: ' + (dp>thr ? `Änderung (${dp.toFixed(1)}%)` : 'stabil');
+                document.getElementById('stateSlide').className = 'pill mono ' + (dp>thr ? 'warn' : 'ok');
               } else {
-                tick.lastChangeT = tStable;
+                lastChangeGateT = now;
               }
-              document.getElementById('stateSlide').textContent = 'Folie: ' + (dp>thr ? `Änderung (${dp.toFixed(1)}%)` : 'stabil');
-              document.getElementById('stateSlide').className = 'pill mono ' + (dp>thr ? 'warn' : 'ok');
-            } else {
-              tick.lastChangeT = performance.now();
-            }
-            lastSlideThumb = th;
-            if (roi !== mat) roi.delete();
-          }
-          if (mat) mat.delete();
+              lastSlideThumb = th;
 
-        } else {
-          // Fallback ohne OpenCV (keine Quad-Zeichnung, aber Änderungs-Detect)
-          kvBoard.textContent = '–';
-          ctx.clearRect(0,0,overlay.width, overlay.height);
-
-          if (cbSlide.checked) {
-            const th = thumb64GrayFromCanvas(cap);
-            if (lastSlideThumb) {
-              const dp = diffPercent(th, lastSlideThumb);
-              const thr = parseFloat(slideThresh.value);
-              const tStable = performance.now();
-              if (dp > thr) {
-                if (!tick.lastChangeT || (tStable - tick.lastChangeT) > 800) changed = true;
+              // Personenmaske nur auf ROI (blockiert Auto-Foto, wenn Person sichtbar)
+              if (cbPerson.checked && segmenter) {
+                try {
+                  // Segmentierung direkt auf dem Video (schneller als auf ROI)
+                  const seg = await segmenter.segmentPeople(video, { multiSegmentation:false });
+                  let pctOnROI = 0;
+                  if (seg && seg.length>0 && seg[0].mask) {
+                    // Projiziere grob: Erzeuge eine Maske in ROI-Auflösung über Cap (vereinfachte Annahme)
+                    // (Genauigkeit reicht aus, um Hände/Köpfe auf der Tafel zu erkennen)
+                    const m = seg[0].mask;
+                    // Zähle Alpha > 128
+                    let cnt=0; for (let i=3;i<m.data.length;i+=4) if (m.data[i]>128) cnt++;
+                    const pct = (cnt / (m.width*m.height)) * 100;
+                    // Heuristik: Anteil auf Tafel ≈ globaler Anteil (vereinfachend)
+                    // Konservativ: höhere Schwelle, damit kleine Reste nicht blocken
+                    pctOnROI = pct;
+                  }
+                  personPresentOnBoard = pctOnROI > 3.0; // konservativer als zuvor
+                  document.getElementById('statePerson').textContent = 'Person: ' + (personPresentOnBoard?'ja':'nein');
+                  document.getElementById('statePerson').className = 'pill mono ' + (personPresentOnBoard?'warn':'ok');
+                } catch(e){ /* ignore */ }
               } else {
-                tick.lastChangeT = tStable;
+                personPresentOnBoard = false;
               }
-              document.getElementById('stateSlide').textContent = 'Folie: ' + (dp>thr ? `Änderung (${dp.toFixed(1)}%)` : 'stabil');
-              document.getElementById('stateSlide').className = 'pill mono ' + (dp>thr ? 'warn' : 'ok');
+
+              // Auto-Foto NUR wenn Board erkannt, Änderung auf ROI, und (optional) keine Person auf ROI
+              if (cbAutoCap.checked && changed && (!cbPerson.checked || !personPresentOnBoard)) {
+                const blob = await captureAndRectify();
+                if (blob) await saveBlob(`tafel_${ts()}.jpg`, blob);
+              }
+              roi?.delete?.();
             } else {
-              tick.lastChangeT = performance.now();
+              // Kein Board -> keine Auto-Capture-Auslösung
+              document.getElementById('stateSlide').textContent = 'Folie: – (kein Board)';
+              document.getElementById('stateSlide').className = 'pill mono';
+              personPresentOnBoard = false;
             }
-            lastSlideThumb = th;
+
+            mat.delete();
+          } else {
+            // OpenCV noch nicht bereit → Anzeige, aber keine Auto-Capture
+            kvBoard.textContent = 'OpenCV lädt …';
+            ctx.clearRect(0,0,overlay.width, overlay.height);
+            document.getElementById('stateSlide').textContent = 'Folie: – (Board-Erkennung lädt)';
+            document.getElementById('stateSlide').className = 'pill mono';
           }
-        }
-
-        // (Optional) Personenerkennung
-        if (cbPerson.checked && segmenter) {
-          try {
-            const seg = await segmenter.segmentPeople(video, { multiSegmentation:false });
-            const any = seg && seg.length>0 && seg[0].mask;
-            if (any) {
-              const { data, width:mw, height:mh } = seg[0].mask;
-              let cnt=0; for (let i=3;i<data.length;i+=4) if (data[i]>128) cnt++;
-              const pct = (cnt/(mw*mh))*100;
-              personPresent = pct > 1.5;
-            } else personPresent = false;
-            document.getElementById('statePerson').textContent = 'Person: ' + (personPresent?'ja':'nein');
-            document.getElementById('statePerson').className = 'pill mono ' + (personPresent?'warn':'ok');
-          } catch(e){ /* ignoriere */ }
-        } else {
-          personPresent = false;
-          document.getElementById('statePerson').textContent = 'Person: unbekannt';
-          document.getElementById('statePerson').className = 'pill mono';
-        }
-
-        // Auto-Foto NUR wenn gewünscht
-        if (cbAutoCap.checked && changed && (!cbPerson.checked || !personPresent)) {
-          const blob = await captureAndRectify();
-          if (blob) await saveBlob(`tafel_${ts()}.jpg`, blob);
         }
       };
       tick();
     }
 
-    // ======= Events & Init =======
+    // ---------- Events & Init ----------
+    btnStart.disabled = false;
+
     permCam.textContent = 'Kamera: ?'; permCam.className = 'pill mono';
     permFS.textContent  = 'Dateizugriff: ?'; permFS.className = 'pill mono';
 

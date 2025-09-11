@@ -1,4 +1,5 @@
-<!doctype html>
+
+doctype html>
 <html lang="de">
 <head>
   <meta charset="utf-8" />
@@ -39,24 +40,12 @@
     .toggle { display:flex; align-items:center; gap:.4rem; }
 
     .stage { position: relative; }
-    /* Livebild + Overlay (transparent) */
+    /* Video zeigt das Livebild; Overlay wird erzwungen transparent darüber gelegt */
     video { width:100%; height:100%; object-fit: contain; background: #000; border-radius: 10px; }
     canvas { width:100%; height:100%; object-fit: contain; border-radius: 10px; }
-    #preview { position:absolute; inset:0; z-index:1; }
-    #overlay { position:absolute; inset:0; pointer-events:none; background: transparent; z-index:2; }
-
-    /* Shutter-Flash + Toast (neu) */
-    #flash { position:absolute; inset:0; border-radius:10px; background:#fff; opacity:0; pointer-events:none; z-index:3; transition: opacity 120ms ease; }
-    #flash.show { opacity: .85; }
-    #toast {
-      position:absolute; right:10px; bottom:10px; z-index:4;
-      background: rgba(15,17,21,.9); color: var(--fg);
-      border:1px solid var(--border); border-radius: 8px; padding:.4rem .6rem;
-      opacity:0; transform: translateY(8px);
-      transition: opacity 180ms ease, transform 180ms ease;
-      font-size: .9rem;
-    }
-    #toast.show { opacity:1; transform: translateY(0); }
+    #preview { position:absolute; inset:0; z-index:0; }            /* <-- z-index fix */
+    #overlay { position:absolute; inset:0; pointer-events:none; 
+               z-index:1; background: transparent !important; }    /* <-- transparent fix */
 
     .status { display:grid; grid-template-columns: 1fr 1fr; gap:.35rem; font-size:.85rem; color:var(--muted) }
     .status div { background:#11151d; border:1px solid var(--border); border-radius:8px; padding:.35rem .5rem; }
@@ -76,9 +65,6 @@
     <div class="stage card">
       <video id="preview" playsinline autoplay muted></video>
       <canvas id="overlay"></canvas>
-      <!-- NEU: visuelles Feedback -->
-      <div id="flash" aria-hidden="true"></div>
-      <div id="toast" role="status" aria-live="polite"></div>
     </div>
 
     <div class="controls-top card">
@@ -137,8 +123,6 @@
     const video = qs('#preview');
     const overlay = qs('#overlay');
     const ctx = overlay.getContext('2d');
-    const flashEl = qs('#flash');      // NEU
-    const toastEl = qs('#toast');      // NEU
     const btnStart = qs('#btnStart');
     const btnTorch = qs('#btnTorch');
     const btnShot = qs('#btnShot');
@@ -146,7 +130,7 @@
     const cbUseDownloads = qs('#cbUseDownloads');
     const cbPerson = qs('#cbPerson');
     const cbSlide = qs('#cbSlide');
-    const cbAutoCap = qs('#cbAutoCap'); // NEU
+    const cbAutoCap = qs('#cbAutoCap');
     const slideThresh = qs('#slideThresh');
     const slideVal = qs('#slideVal');
 
@@ -180,7 +164,6 @@
     let animId = 0;
     let lastFpsT = performance.now();
     let frames = 0;
-    let toastTimer = 0;   // NEU
 
     slideVal.textContent = slideThresh.value + '%';
     slideThresh.addEventListener('input', () => slideVal.textContent = slideThresh.value + '%');
@@ -191,23 +174,12 @@
       return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
     }
 
-    // ===== Visuelles Feedback (NEU) =====
-    function flash() {
-      flashEl.classList.add('show');
-      setTimeout(() => flashEl.classList.remove('show'), 160);
-    }
-    function toast(msg) {
-      toastEl.textContent = msg;
-      toastEl.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1300);
-    }
-
     // ==== Kamera (mit Fallback & Autoplay-Fix) ====
     async function startCamera() {
       try {
         stopCamera();
 
+        // Mobile: Inline & stumm, sonst blockt play()
         video.setAttribute('playsinline', '');
         video.muted = true;
         video.autoplay = true;
@@ -228,6 +200,7 @@
 
         video.srcObject = stream;
 
+        // Auflösung/Overlay erst setzen, wenn Metadaten da sind
         const applyMeta = () => {
           const w = video.videoWidth  || overlay.clientWidth  || 1280;
           const h = video.videoHeight || overlay.clientHeight || 720;
@@ -330,7 +303,7 @@
       return false;
     }
 
-    // ==== Capture (Offscreen-Canvas) ====
+    // ---- Capture: Offscreen‑Canvas (nicht Overlay) ----
     async function captureAndRectify() {
       if (!stream) return null;
 
@@ -358,13 +331,10 @@
       return blob;
     }
 
-    // Manuell: Flash + Toast
     btnShot.addEventListener('click', async () => {
-      flash(); // visuell sofort
       const shot = await captureAndRectify();
       if (!shot) return;
-      const ok = await saveBlob(`tafel_${ts()}.jpg`, shot);
-      toast(ok ? 'Foto gespeichert' : 'Speichern fehlgeschlagen');
+      await saveBlob(`tafel_${ts()}.jpg`, shot);
     });
 
     // ===== Lazy Loader =====
@@ -434,31 +404,6 @@
       return [top[0], top[1], bot[1], bot[0]];
     }
 
-    // Hervorhebung der Tafel (nur wenn Auto-Cap aktiv)
-    function drawQuad(q) {
-      ctx.clearRect(0,0,overlay.width, overlay.height);
-      if (!q) return;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(q[0].x,q[0].y); for (let i=1;i<q.length;i++) ctx.lineTo(q[i].x,q[i].y);
-      ctx.closePath();
-
-      if (cbAutoCap.checked) {
-        // Sichtbare Hervorhebung im Auto-Modus
-        ctx.fillStyle = 'rgba(52, 211, 153, 0.20)';   // grünlich-transparent
-        ctx.fill();
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = 'rgba(52, 211, 153, 0.95)';
-      } else {
-        // dezente Outline, wenn Auto aus
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(76, 201, 240, 0.9)';  // Cyan
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
-
     function warpToBoard(mat, quad) {
       const [tl,tr,br,bl] = quad;
       const widthA = Math.hypot(br.x - bl.x, br.y - bl.y);
@@ -477,6 +422,17 @@
       return dst;
     }
 
+    function drawQuad(q) {
+      if (!q) { ctx.clearRect(0,0,overlay.width, overlay.height); return; }
+      ctx.save();
+      ctx.clearRect(0,0,overlay.width, overlay.height);
+      ctx.strokeStyle = 'rgba(76,201,240,0.9)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(q[0].x,q[0].y); for (let i=1;i<q.length;i++) ctx.lineTo(q[i].x,q[i].y);
+      ctx.closePath(); ctx.stroke(); ctx.restore();
+    }
+
     function thumb64GrayCV(mat) {
       const dst = new cv.Mat(); const size = new cv.Size(64,64);
       cv.resize(mat, dst, size, 0,0, cv.INTER_AREA);
@@ -486,7 +442,6 @@
       dst.delete(); gray.delete();
       return arr;
     }
-    // Fallback ohne OpenCV
     function thumb64GrayCanvas(canvas) {
       const tmp = document.createElement('canvas');
       tmp.width = 64; tmp.height = 64;
@@ -519,7 +474,10 @@
         animId = requestAnimationFrame(tick);
         if (!stream) return;
 
-        // ~alle 250ms analysieren
+        // Overlay leer (transparent)
+        ctx.clearRect(0,0,w,h);
+
+        // alle ~250ms analysieren
         const now = performance.now();
         const doDetect = (now - lastQuadAt) > 250;
         if (doDetect) {
@@ -531,14 +489,14 @@
           if (window.cv && cvReady) {
             mat = cv.imread(capCanvas);
 
-            // Board erkennen + visualisieren
+            // Board
             const found = findBoardQuad(mat);
-            if (found) { boardQuad = found; kvBoard.textContent = 'ja'; } else { boardQuad = null; kvBoard.textContent = 'nein'; }
+            if (found) { boardQuad = found; kvBoard.textContent = 'ja'; } else { kvBoard.textContent = 'nein'; }
             drawQuad(boardQuad);
 
-            // Slide-Änderung (ROI = Board wenn vorhanden)
+            // Slide-Thumb (mit/ohne Warp)
             if (cbSlide.checked) {
-              const roi = boardQuad ? warpToBoard(mat, boardQuad) : mat;
+              let roi = boardQuad ? warpToBoard(mat, boardQuad) : mat;
               const th = thumb64GrayCV(roi);
               if (lastSlideThumb) {
                 const dp = diffPercent(th, lastSlideThumb);
@@ -559,8 +517,7 @@
             }
 
           } else {
-            // Fallback ohne OpenCV → nur Slide-Änderung, kein Board-Overlay
-            drawQuad(null); // nichts zeichnen
+            // Fallback ohne OpenCV – Fullframe-Thumb
             if (cbSlide.checked) {
               const th = thumb64GrayCanvas(capCanvas);
               if (lastSlideThumb) {
@@ -601,14 +558,10 @@
           statePerson.textContent = 'Person: ' + (personPresent? 'ja' : 'nein');
           statePerson.className = 'pill ' + (personPresent? 'warn' : 'ok');
 
-          // Auto-Capture NUR wenn explizit aktiviert, Tafel erkannt und ggf. keine Person
-          if (cbAutoCap.checked && boardQuad && changed && (!cbPerson.checked || !personPresent)) {
-            flash(); // visuell sofort
+          // Auto-Capture nur, wenn explizit eingeschaltet
+          if (cbAutoCap.checked && changed && (!cbPerson.checked || !personPresent)) {
             const blob = await captureAndRectify();
-            if (blob) {
-              const ok = await saveBlob(`tafel_${ts()}.jpg`, blob);
-              toast(ok ? 'Auto‑Foto gespeichert' : 'Speichern fehlgeschlagen');
-            }
+            if (blob) await saveBlob(`tafel_${ts()}.jpg`, blob);
           }
 
           if (mat && mat.delete) mat.delete();
@@ -629,37 +582,6 @@
 
     if (!window.isSecureContext && location.hostname!=='localhost') {
       alert('Hinweis: Kamera funktioniert nur über HTTPS oder http://localhost');
-    }
-
-    // Lazy: lade OpenCV erst wenn nötig (wird in runLoop getriggert)
-    let cvReady = false, cvLoading = false;
-    function loadOpenCV() {
-      if (cvReady || cvLoading) return;
-      cvLoading = true;
-      const s = document.createElement('script');
-      s.src = 'https://docs.opencv.org/4.x/opencv.js';
-      s.async = true;
-      s.onload = () => {
-        const check = () => { if (cv && cv['onRuntimeInitialized']) { cv['onRuntimeInitialized'] = () => { cvReady = true; }; } };
-        try { check(); } catch {}
-        setTimeout(() => { if (!cvReady && cv && cv.Mat) cvReady = true; }, 1500);
-      };
-      document.head.appendChild(s);
-    }
-    let tfReady = false, tfLoading = false, segmenter = null;
-    async function loadSegmentation() {
-      if (segmenter) return segmenter;
-      if (tfLoading) { while(!segmenter) { await new Promise(r=>setTimeout(r,100)); } return segmenter; }
-      tfLoading = true;
-      await import('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js');
-      const mod = await import('https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js');
-      const bs = mod.bodySegmentation;
-      segmenter = await bs.createSegmenter(bs.SupportedModels.MediaPipeSelfieSegmentation, {
-        runtime: 'tfjs', modelType: 'landscape', enableSegmentationSmoothing: true
-      });
-      kvModel.textContent = 'SelfieSegmentation';
-      tfReady = true;
-      return segmenter;
     }
   })();
   </script>

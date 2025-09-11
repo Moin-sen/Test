@@ -7,138 +7,46 @@
     name="viewport"
     content="width=device-width, height=device-height, initial-scale=1, viewport-fit=cover, user-scalable=no"
   />
-  <title>TafelCapture – lokal, smart, schnell</title>
+  <title>TafelCapture v2 – lokal, smart, stabil</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b0e13;
-      --fg: #e9eef5;
-      --muted: #a7b3c0;
-      --accent: #4ea1ff;
-      --ok: #11c46a;
-      --warn: #ffb020;
-      --bad: #ff4d6d;
-      --overlay: rgba(78,161,255,0.22);
-      --overlay-stroke: rgba(78,161,255,0.85);
+      --bg: #0b0e13; --fg: #e9eef5; --muted:#a7b3c0; --accent:#4ea1ff;
+      --ok:#11c46a; --warn:#ffb020; --bad:#ff4d6d;
     }
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
-      height: 100%;
-      overflow: hidden;
+    html, body { margin:0; padding:0; background:var(--bg); color:var(--fg); font-family:system-ui,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif; height:100%; overflow:hidden; }
+    #app { display:grid; grid-template-rows:auto 1fr auto; height:100dvh; width:100vw; }
+    header { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; padding:.5rem .75rem; background:#0f131a; border-bottom:1px solid #1a212c; }
+    header .group { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+    button, select, .chip {
+      background:#16202c; color:var(--fg); border:1px solid #223041; border-radius:.5rem; padding:.5rem .65rem; font-size:.95rem;
     }
-    #app {
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      height: 100dvh; /* stabil auf Android Chrome */
-      width: 100vw;
-    }
-    /* Topbar */
-    header {
-      display: flex;
-      flex-wrap: wrap;
-      gap: .5rem;
-      align-items: center;
-      padding: .5rem .75rem;
-      background: #0f131a;
-      border-bottom: 1px solid #1a212c;
-    }
-    header .group { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-    button, select, label.toggle {
-      background: #16202c;
-      color: var(--fg);
-      border: 1px solid #223041;
-      border-radius: .5rem;
-      padding: .5rem .65rem;
-      font-size: .95rem;
-    }
-    button:hover { border-color: var(--accent); }
-    button.primary { background: #1a2b3f; border-color: #2a4060; }
-    button.danger { background: #3a1620; border-color: #5c2230; }
-    select { padding-right: 2rem; }
-    .kpi { font-variant-numeric: tabular-nums; color: var(--muted); }
-    .kpi b { color: var(--fg); }
-    /* Stage */
-    #stage {
-      position: relative;
-      background: black;
-      overflow: hidden;
-      touch-action: none; /* für Pinch/Pan */
-    }
-    video#video {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;  /* keine Balken */
-      transform-origin: center center;
-      will-change: transform;
-    }
-    canvas#overlay {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      transform-origin: center center;
-    }
-    /* Zoom Slider bottom */
-    #bottomBar {
-      display: flex;
-      align-items: center;
-      gap: .75rem;
-      padding: .6rem .8rem;
-      background: #0f131a;
-      border-top: 1px solid #1a212c;
-    }
-    #zoomSlider { width: 100%; }
-    #status {
-      display: grid;
-      grid-template-columns: repeat(5, auto);
-      gap: .75rem 1.2rem;
-      align-items: center;
-      padding: .35rem .75rem;
-      font-size: .9rem;
-      color: var(--muted);
-    }
-    #status .ok { color: var(--ok); }
-    #status .warn { color: var(--warn); }
-    #status .bad { color: var(--bad); }
-    /* Chips toggles */
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: .45rem;
-      padding: .35rem .55rem;
-      border-radius: 999px;
-      background: #16202c;
-      border: 1px solid #223041;
-      font-size: .9rem;
-    }
-    .chip input { accent-color: var(--accent); }
-    /* Small helpers */
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-    .muted { color: var(--muted); }
-    .spacer { flex: 1; }
-    /* Debug panel */
-    #debug {
-      position: absolute;
-      right: .5rem; bottom: .5rem;
-      background: rgba(15, 19, 26, 0.75);
-      border: 1px solid #263445;
-      border-radius: .5rem;
-      padding: .4rem .6rem;
-      font-size: .8rem;
-      color: var(--muted);
-      max-width: 45vw;
-      pointer-events: none;
-      display: none;
-      white-space: pre;
-    }
+    button.primary { background:#1a2b3f; border-color:#2a4060; }
+    .kpi { font-variant-numeric: tabular-nums; color:var(--muted); }
+    .kpi b { color:var(--fg); }
+    #stage { position:relative; background:black; overflow:hidden; touch-action:none; }
+    video#video, canvas#overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform-origin:center center; }
+    canvas#overlay { pointer-events:none; }
+    #bottomBar { display:flex; align-items:center; gap:.75rem; padding:.6rem .8rem; background:#0f131a; border-top:1px solid #1a212c; }
+    #zoomSlider { width:100%; }
+    #status { display:grid; grid-template-columns: repeat(5, auto); gap:.75rem 1.2rem; align-items:center; padding:.35rem .75rem; font-size:.9rem; color:var(--muted); }
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+    .spacer{flex:1} .mono{font-family:ui-monospace,Menlo,Consolas,monospace} .muted{color:var(--muted)}
+    .chip { display:inline-flex; gap:.45rem; border-radius:999px; }
+    #banner { position:absolute; left:50%; top:12px; transform:translateX(-50%); background:rgba(15,19,26,.85); border:1px solid #263445; padding:.45rem .7rem; border-radius:.5rem; font-size:.9rem; z-index:5; display:none; }
+    #debug { position:absolute; right:.5rem; bottom:.5rem; background:rgba(15,19,26,.8); border:1px solid #263445; border-radius:.5rem; padding:.4rem .6rem; font-size:.8rem; color:var(--muted); max-width:45vw; pointer-events:none; display:none; white-space:pre; z-index:6; }
   </style>
+  <!-- OpenCV.js (WASM) – mit locateFile, damit die .wasm sicher vom CDN geladen wird -->
+  <script>
+    // Konfig vor Laden von OpenCV: sichere Pfade für .wasm
+    self.Module = {
+      locateFile: (path) => {
+        // Lädt sowohl opencv.js Neben-Dateien als auch .wasm vom offiziellen CDN
+        return 'https://docs.opencv.org/4.x/' + path;
+      }
+    };
+  </script>
+  <script async src="https://docs.op.js</script>
 </head>
 <body>
   <div id="app">
@@ -148,18 +56,18 @@
         <select id="selCam" title="Kamera / Linse wählen" disabled>
           <option>— Kamera wird geladen —</option>
         </select>
-        <button id="btnSnap">📸 Manuell</button>
+        <button id="btnSnap" disabled>📸 Manuell</button>
       </div>
       <div class="group">
         <button id="btnDir">📁 Ordner wählen</button>
         <span class="kpi" id="saveMode">Speichern: <b>Download</b></span>
       </div>
       <div class="group">
-        <label class="chip"><input type="checkbox" id="tglBoardChange"> Folien-Änderung</label>
+        <label class="chip"><input type="checkbox" id="tglBoardChange" checked> Folien-Änderung</label>
         <label class="chip"><input type="checkbox" id="tglAuto"> Auto Foto</label>
         <label class="chip"><input type="checkbox" id="tglBlocker" checked> Objekte blockieren</label>
-        <label class="chip"><input type="checkbox" id="tglFace" > Face-Blocker (optional)</label>
-        <label class="chip"><input type="checkbox" id="tglOCR" > OCR (optional)</label>
+        <label class="chip"><input type="checkbox" id="tglFace"> Face-Blocker (optional)</label>
+        <label class="chip"><input type="checkbox" id="tglOCR"> OCR (optional)</label>
       </div>
       <div class="spacer"></div>
       <div class="group">
@@ -169,14 +77,15 @@
     </header>
 
     <div id="stage">
-      <video id="video" playsinline muted autoplay></video>
+      <div id="banner"></div>
+      <video id="video" playsinline muted></video>
       <canvas id="overlay"></canvas>
       <div id="debug"></div>
     </div>
 
     <div id="bottomBar">
       <label for="zoomSlider">🔎 Zoom</label>
-      <input id="zoomSlider" type="range" min="1" max="10" step="0.01" value="1">
+      <input id="zoomSlider" type="range" min="1" max="10" step="0.01" value="1" disabled>
       <span id="zoomInfo" class="kpi">Anzeige 1.00× | HW —</span>
     </div>
 
@@ -184,766 +93,422 @@
       <div>Board erkannt: <b id="stBoard" class="bad">nein</b></div>
       <div>Auto: <b id="stAuto" class="warn">aus</b></div>
       <div>Blocker: <b id="stBlock" class="warn">—</b></div>
-      <div>Modelle: <span id="stModels" class="mono">OpenCV, Motion</span></div>
+      <div>Modelle: <span id="stModels" class="mono">OpenCV?</span></div>
       <div>Diff: <span id="stDiff" class="mono">—</span></div>
     </div>
   </div>
 
-  <!-- OpenCV.js (WASM) für Board-Erkennung & Entzerrung -->
-  <script defer src="https://docs.opencv.org/4t>
   <script>
-  // ======== Utilities ========
-  const $ = sel => document.querySelector(sel);
+  // ===== Utils =====
+  const $ = s => document.querySelector(s);
   const on = (el, ev, fn, opts) => el.addEventListener(ev, fn, opts);
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const format = (n, d=2) => Number(n).toFixed(d);
-  const log = (...args) => console.log('[TafelCapture]', ...args);
+  const clamp = (v,l,h)=>Math.max(l,Math.min(h,v));
+  const fmt = (n,d=2)=>Number(n).toFixed(d);
+  const banner = $('#banner');
+  function showBanner(msg, cls='warn', ms=3000){ banner.textContent=msg; banner.style.display='block'; banner.className=cls; clearTimeout(showBanner._t); showBanner._t=setTimeout(()=>banner.style.display='none', ms); }
+  const debugBox = $('#debug');
+  let SHOW_DEBUG = (new URL(location.href).searchParams.get('debug') === '1');
 
-  // Persist settings
-  const store = {
-    get k() { return 'tafelcapture.v1'; },
-    load() { try { return JSON.parse(localStorage.getItem(this.k) || '{}'); } catch { return {}; } },
-    save(obj) { localStorage.setItem(this.k, JSON.stringify(obj)); }
-  };
+  // ===== Elements =====
+  const video = $('#video');
+  const overlay = $('#overlay'), ctxOv = overlay.getContext('2d');
+  const btnStart = $('#btnStart'), selCam = $('#selCam'), btnSnap = $('#btnSnap');
+  const btnDir = $('#btnDir'), saveMode = $('#saveMode');
+  const tglBoardChange = $('#tglBoardChange'), tglAuto = $('#tglAuto');
+  const tglBlocker = $('#tglBlocker'), tglFace = $('#tglFace'), tglOCR = $('#tglOCR');
+  const kpiRes = $('#kpiRes'), kpiFps = $('#kpiFps'), stBoard = $('#stBoard');
+  const stAuto = $('#stAuto'), stBlock = $('#stBlock'), stModels = $('#stModels'), stDiff = $('#stDiff');
+  const zoomSlider = $('#zoomSlider'), zoomInfo = $('#zoomInfo');
 
-  // Dynamic loaders
-  async function loadScript(src) {
-    return new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = src; s.async = true; s.onload = () => res(); s.onerror = e => rej(e);
-      document.head.appendChild(s);
+  // ===== State =====
+  let mediaStream=null, track=null, caps=null, sets=null;
+  let hardwareZoomSupported=false, hwMin=1, hwMax=1, displayZoom=1;
+  let dirHandle=null, haveFSAccess=('showDirectoryPicker' in window);
+  let cvReady=false, cvFailed=false;
+  let loopRunning=false;
+  let boardQuad=null, boardFound=false, H_warp=null, targetW=1600,targetH=900;
+  let prevThumb=null; let lastChangeTs=0; const CHANGE_THRESH=0.09, STABLE_MS=800, COOLDOWN_MS=3500;
+  let fpsCounter={last: performance.now(), frames:0};
+
+  // ===== Layout sync =====
+  function resizeOverlay(){ const r=video.getBoundingClientRect(); overlay.width=Math.round(r.width); overlay.height=Math.round(r.height); }
+  new ResizeObserver(resizeOverlay).observe($('#stage'));
+  function applyDisplayTransform(){ const t=`scale(${displayZoom})`; video.style.transform=t; overlay.style.transform=t; }
+
+  // ===== OpenCV init (with timeout & fallback) =====
+  async function ensureCV(timeoutMs=8000){
+    if (cvReady || cvFailed) return cvReady;
+    const start=performance.now();
+    return new Promise((res)=>{
+      const tick=()=> {
+        if (typeof cv!=='undefined' && cv?.Mat){ cvReady=true; stModels.textContent='OpenCV, Motion'; res(true); return; }
+        if (performance.now()-start>timeoutMs){ cvFailed=true; stModels.textContent='(ohne OpenCV)'; showBanner('OpenCV konnte nicht geladen werden – Board-Erkennung aus', 'bad', 5000); res(false); return; }
+        requestAnimationFrame(tick);
+      };
+      tick();
     });
   }
 
-  // ======== Elements ========
-  const video = $('#video');
-  const overlay = $('#overlay');
-  const ctxOv = overlay.getContext('2d');
-  const debugBox = $('#debug');
-
-  const btnStart = $('#btnStart');
-  const selCam = $('#selCam');
-  const btnSnap = $('#btnSnap');
-  const btnDir = $('#btnDir');
-  const saveMode = $('#saveMode');
-
-  const tglBoardChange = $('#tglBoardChange');
-  const tglAuto = $('#tglAuto');
-  const tglBlocker = $('#tglBlocker');
-  const tglFace = $('#tglFace');
-  const tglOCR = $('#tglOCR');
-
-  const kpiRes = $('#kpiRes');
-  const kpiFps = $('#kpiFps');
-  const stBoard = $('#stBoard');
-  const stAuto = $('#stAuto');
-  const stBlock = $('#stBlock');
-  const stModels = $('#stModels');
-  const stDiff = $('#stDiff');
-  const zoomSlider = $('#zoomSlider');
-  const zoomInfo = $('#zoomInfo');
-
-  // ======== State ========
-  let mediaStream = null;
-  let track = null;
-  let trackCapabilities = null;
-  let trackSettings = null;
-
-  let hardwareZoomSupported = false;
-  let hwZoomMin = 1, hwZoomMax = 1, hwZoomStep = 0.1;
-  let displayZoom = 1;
-  let panX = 0, panY = 0; // optional (keine UI), zentriert
-
-  let dirHandle = null;
-  let haveFSAccess = 'showDirectoryPicker' in window;
-
-  // Board detection / homography
-  let boardQuad = null;     // [{x,y}*4] im overlay space
-  let boardFound = false;
-  let H_warp = null;        // cv.Mat 3x3
-  let targetW = 1600, targetH = 900; // Ziel-Plane (16:9)
-
-  // Change detection
-  let prevBoardThumb = null; // Uint8ClampedArray (grau, klein)
-  let lastChangeTs = 0;
-  const CHANGE_COOLDOWN_MS = 3500;  // Mindestabstand Auslösungen
-  const CHANGE_STABLE_MS = 800;     // Änderung muss so lange stabil sein
-  const CHANGE_THRESH = 0.09;       // MSE auf [0..1] Skala
-  const MOTION_BLOCK_FRAC = 0.035;  // Flächenanteil in Boardmaske -> block
-
-  // FPS calc
-  let fpsCounter = { last: performance.now(), frames: 0, fps: 0 };
-
-  // Person block (face)
-  let faceModel = null, tfLoaded = false, blazefaceLoaded = false;
-
-  // OCR
-  let tesseractLoaded = false;
-
-  // Debug toggle
-  let SHOW_DEBUG = false;
-
-  // ======== Layout sync ========
-  function resizeOverlay() {
-    const r = video.getBoundingClientRect();
-    overlay.width = Math.round(r.width);
-    overlay.height = Math.round(r.height);
-  }
-  const ro = new ResizeObserver(() => resizeOverlay());
-  ro.observe($('#stage'));
-
-  // Apply display zoom to video & overlay (identisch halten)
-  function applyDisplayTransform() {
-    const t = `translate(${panX}px, ${panY}px) scale(${displayZoom})`;
-    video.style.transform = t;
-    overlay.style.transform = t;
-  }
-
-  // ======== Camera ========
-  async function listCameras() {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    let cams = devices.filter(d => d.kind === 'videoinput');
-
-    // Sortierung bevorzugt Tele/Aux/Wide
-    const score = (label) => {
-      const l = (label||'').toLowerCase();
-      let s = 0;
-      if (l.includes('tele')) s -= 30;
-      if (l.includes('aux')) s -= 20;
-      if (l.includes('wide')) s -= 10;   // wide nach tele/aux
-      if (l.includes('ultra')) s += 5;   // ultra nach wide
-      if (l.includes('front')) s += 50;  // hinten bevorzugen
-      if (l.includes('back') || l.includes('rear') || l.includes('environment')) s -= 10;
+  // ===== Camera =====
+  async function listCameras(){
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const cams = devs.filter(d=>d.kind==='videoinput');
+    const score = l=>{
+      l=(l||'').toLowerCase();
+      let s=0;
+      if (l.includes('tele')) s-=30;
+      if (l.includes('aux')) s-=20;
+      if (l.includes('wide')) s-=10;
+      if (l.includes('ultra')) s+=5;
+      if (l.includes('front')) s+=50;
+      if (l.includes('back')||l.includes('rear')||l.includes('environment')) s-=10;
       return s;
     };
-    cams.sort((a, b) => score(a.label) - score(b.label));
-
-    selCam.innerHTML = '';
-    for (const c of cams) {
-      const opt = document.createElement('option');
-      opt.value = c.deviceId;
-      opt.textContent = c.label || `Kamera ${c.deviceId.slice(0,6)}`;
-      selCam.appendChild(opt);
-    }
-    selCam.disabled = cams.length === 0;
+    cams.sort((a,b)=>score(a.label)-score(b.label));
+    selCam.innerHTML='';
+    cams.forEach(c=>{
+      const o=document.createElement('option');
+      o.value=c.deviceId; o.textContent=c.label||`Kamera ${c.deviceId.slice(0,6)}`; selCam.appendChild(o);
+    });
+    selCam.disabled = cams.length===0;
+    if (cams.length===0) showBanner('Keine Kamera gefunden', 'bad', 5000);
   }
 
-  async function startCamera(deviceId=null) {
-    try {
-      if (mediaStream) stopCamera();
+  async function startCamera(deviceId=null){
+    try{
+      btnStart.disabled=true;
+      if (!navigator.mediaDevices?.getUserMedia){
+        showBanner('getUserMedia nicht verfügbar (HTTPS?)', 'bad', 6000);
+        btnStart.disabled=false; return;
+      }
+      if (mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
 
-      // Bevorzugt Rückkamera (environment)
-      const constraints = deviceId ? {
-        video: { deviceId: { exact: deviceId } },
-        audio: false
-      } : {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30, max: 60 }
-        },
-        audio: false
+      const constraints = deviceId ? { video:{deviceId:{exact:deviceId}}, audio:false } : {
+        video:{
+          facingMode:{ideal:'environment'},
+          width:{ideal:1920}, height:{ideal:1080},
+          frameRate:{ideal:30, max:60}
+        }, audio:false
       };
 
       mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = mediaStream;
+      await video.play().catch(()=>{}); // sicher starten
       track = mediaStream.getVideoTracks()[0];
-      trackCapabilities = track.getCapabilities ? track.getCapabilities() : {};
-      trackSettings = track.getSettings ? track.getSettings() : {};
+      caps = track.getCapabilities?.()||{};
+      sets = track.getSettings?.()||{};
+      hardwareZoomSupported = 'zoom' in (caps||{});
+      if (hardwareZoomSupported){ hwMin=caps.zoom.min??1; hwMax=caps.zoom.max??1; }
 
-      hardwareZoomSupported = !!(trackCapabilities && 'zoom' in trackCapabilities);
-      if (hardwareZoomSupported) {
-        hwZoomMin = trackCapabilities.zoom.min ?? 1;
-        hwZoomMax = trackCapabilities.zoom.max ?? 1;
-        hwZoomStep = trackCapabilities.zoom.step ?? 0.1;
-      }
+      kpiRes.textContent = `Auflösung: ${sets.width||video.videoWidth||'—'}×${sets.height||video.videoHeight||'—'}`;
 
-      // Update KPIs
-      updateKpis();
-
-      // Fill camera select after permission (Labels sichtbar)
       await listCameras();
+      btnSnap.disabled=false; zoomSlider.disabled=false;
 
-      // Start processing loop after metadata ready
-      await new Promise(res => on(video, 'loadedmetadata', res, { once: true }));
-      resizeOverlay();
-      applyDisplayTransform();
-      startProcessingLoop();
+      await new Promise(r=> video.onloadedmetadata ? video.onloadedmetadata=r : setTimeout(r,100));
+      resizeOverlay(); applyDisplayTransform();
 
-    } catch (err) {
-      alert('Kamera konnte nicht gestartet werden: ' + err.message);
-      console.error(err);
+      // Processing loop
+      if (!loopRunning){ loopRunning=true; processingLoop(); }
+      showBanner('Kamera läuft', 'ok', 1500);
+    }catch(err){
+      console.error('startCamera error', err);
+      let hint='Unbekannter Fehler';
+      if (err.name==='NotAllowedError') hint='Zugriff verweigert (Kamera-Erlaubnis)';
+      if (err.name==='NotFoundError') hint='Keine passende Kamera gefunden';
+      if (err.name==='NotReadableError') hint='Kamera wird von einer anderen App benutzt';
+      if (err.name==='OverconstrainedError') hint=`Constraint nicht erfüllbar (${err.constraint||'—'})`;
+      showBanner(`Kamera-Fehler: ${hint}`, 'bad', 6000);
+      btnStart.disabled=false;
     }
   }
 
-  function stopCamera() {
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(t => t.stop());
-      mediaStream = null;
+  function updateFps(){ fpsCounter.frames++; const now=performance.now(); if (now - fpsCounter.last >= 1000){ kpiFps.textContent=`FPS: ${fpsCounter.frames}`; fpsCounter.frames=0; fpsCounter.last=now; } }
+
+  // ===== Zoom =====
+  async function applyZoom(total){
+    let hw=1, disp=total;
+    if (hardwareZoomSupported){
+      hw = clamp(total, hwMin, hwMax);
+      try{ await track.applyConstraints({advanced:[{zoom:hw}]}); } catch(e){ console.warn('HW zoom fail', e); hw=1; disp=total; }
+      disp = total / hw;
     }
-  }
-
-  function updateKpis() {
-    const w = trackSettings?.width || video.videoWidth;
-    const h = trackSettings?.height || video.videoHeight;
-    kpiRes.textContent = `Auflösung: ${w||'—'}×${h||'—'}`;
-  }
-
-  // ======== Zoom ========
-  async function applyZoom(totalZoom) {
-    // totalZoom = display + hardware combination
-    let hw = 1, disp = totalZoom;
-
-    if (hardwareZoomSupported) {
-      hw = clamp(totalZoom, hwZoomMin, hwZoomMax);
-      disp = totalZoom / hw;
-      try {
-        await track.applyConstraints({ advanced: [{ zoom: hw }] });
-      } catch (e) {
-        console.warn('HW zoom failed, fallback to display zoom', e);
-        hw = 1;
-        disp = totalZoom;
-      }
-    }
-
     displayZoom = clamp(disp, 1, 10);
     applyDisplayTransform();
-    zoomInfo.textContent = `Anzeige ${format(displayZoom,2)}× | HW ${hardwareZoomSupported ? format(hw,2)+'×' : '—'}`;
+    zoomInfo.textContent = `Anzeige ${fmt(displayZoom,2)}× | HW ${hardwareZoomSupported?fmt(hw,2)+'×':'—'}`;
   }
+  on($('#stage'), 'wheel', (e)=>{ if (e.ctrlKey||e.metaKey){ e.preventDefault(); const cur=parseFloat(zoomSlider.value); const z=clamp(cur+(e.deltaY<0?0.1:-0.1),1,10); zoomSlider.value=z; applyZoom(z);} }, {passive:false});
+  on(zoomSlider,'input',()=>applyZoom(parseFloat(zoomSlider.value)));
 
-  // Pinch-to-zoom
-  let pointers = new Map();
-  function dist(a,b) { const dx=a.clientX-b.clientX, dy=a.clientY-b.clientY; return Math.hypot(dx,dy); }
-  let pinchStartDist = 0, pinchStartZoom = 1;
-  on($('#stage'), 'pointerdown', (e) => {
-    $('#stage').setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId, e);
-    if (pointers.size === 2) {
-      const [p1, p2] = Array.from(pointers.values());
-      pinchStartDist = dist(p1,p2);
-      pinchStartZoom = parseFloat(zoomSlider.value);
-    }
-  });
-  on($('#stage'), 'pointermove', (e) => {
-    if (!pointers.has(e.pointerId)) return;
-    pointers.set(e.pointerId, e);
-    if (pointers.size === 2) {
-      const [p1, p2] = Array.from(pointers.values());
-      const d = dist(p1,p2);
-      const ratio = d / (pinchStartDist || d);
-      const z = clamp(pinchStartZoom * ratio, 1, 10);
-      zoomSlider.value = z;
-      applyZoom(z);
-    }
-  });
-  on($('#stage'), 'pointerup', (e) => { pointers.delete(e.pointerId); });
-  on($('#stage'), 'pointercancel', (e) => { pointers.delete(e.pointerId); });
-
-  on(zoomSlider, 'input', () => applyZoom(parseFloat(zoomSlider.value)));
-
-  // ======== File System Access ========
-  async function chooseDirectory() {
-    if (!haveFSAccess) {
-      alert('File System Access API wird von diesem Browser nicht unterstützt. Es wird als Download gespeichert.');
-      return;
-    }
-    try {
-      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  // ===== File System Access =====
+  async function chooseDirectory(){
+    if (!haveFSAccess){ showBanner('FS Access API nicht unterstützt – nutze Downloads', 'warn', 5000); return; }
+    try{
+      dirHandle = await window.showDirectoryPicker({mode:'readwrite'});
       saveMode.innerHTML = 'Speichern: <b>Ordner</b>';
-      store.save({ ...store.load(), dirGranted: true });
-    } catch (e) {
-      console.warn('Dir pick canceled or failed', e);
-    }
+    }catch(e){ console.warn('dir pick', e); }
   }
-
-  async function hasWritePerm(handle) {
-    const p = await handle.queryPermission({ mode: 'readwrite' });
-    if (p === 'granted') return true;
-    const r = await handle.requestPermission({ mode: 'readwrite' });
-    return r === 'granted';
-  }
-
-  async function saveImage(blob, basename='Tafel') {
-    const ts = new Date();
-    const fmt = s => String(s).padStart(2,'0');
-    const name = `${basename}_${ts.getFullYear()}${fmt(ts.getMonth()+1)}${fmt(ts.getDate())}_${fmt(ts.getHours())}${fmt(ts.getMinutes())}${fmt(ts.getSeconds())}.png`;
-
-    if (dirHandle && haveFSAccess && await hasWritePerm(dirHandle)) {
-      const fh = await dirHandle.getFileHandle(name, { create: true });
-      const w = await fh.createWritable();
-      await w.write(blob);
-      await w.close();
-      return { mode: 'folder', name };
-    } else {
-      // Fallback Download
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      URL.revokeObjectURL(a.href);
-      a.remove();
-      return { mode: 'download', name };
-    }
-  }
-
-  // ======== Image helpers ========
-  function drawToCanvas(srcVideo, w, h) {
-    // Draw current video frame to temp canvas
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    x.drawImage(srcVideo, 0, 0, w, h);
-    return { canvas: c, ctx: x };
-  }
-
-  function toGrayThumb(imgData, tw=128, th=72) {
-    // Downscale & grayscale [0..1], returns Float32Array or Uint8ClampedArray
-    const c = document.createElement('canvas');
-    c.width = tw; c.height = th;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    x.drawImage(imgData, 0, 0, tw, th);
-    const id = x.getImageData(0,0,tw,th).data;
-    const out = new Float32Array(tw*th);
-    for (let i=0,j=0; i<id.length; i+=4, j++) {
-      const r=id[i], g=id[i+1], b=id[i+2];
-      out[j] = (0.299*r + 0.587*g + 0.114*b) / 255;
-    }
-    return { data: out, w: tw, h: th };
-  }
-
-  function mse(a, b) {
-    if (!a || !b || a.data.length !== b.data.length) return 1;
-    let s = 0;
-    for (let i=0; i<a.data.length; i++) {
-      const d = a.data[i] - b.data[i];
-      s += d*d;
-    }
-    return s / a.data.length;
-  }
-
-  // ======== OpenCV integration ========
-  let cvReady = false;
-  async function waitForCV() {
-    if (cvReady) return;
-    // opencv.js calls cv['onRuntimeInitialized']
-    await new Promise((res) => {
-      if (typeof cv !== 'undefined' && cv?.Mat) { cvReady = true; res(); return; }
-      const intv = setInterval(() => {
-        if (typeof cv !== 'undefined' && cv?.Mat) { clearInterval(intv); cvReady = true; res(); }
-      }, 50);
-    });
-  }
-
-  function detectBoardQuad(frameCanvas, scale=0.5) {
-    // Returns quad in overlay pixel space: [{x,y}*4] or null
-    const w = frameCanvas.width, h = frameCanvas.height;
-    const sw = Math.max(320, Math.round(w*scale)), sh = Math.max(180, Math.round(h*scale));
-    // Prepare cv mats
-    let src = cv.imread(frameCanvas);
-    let resized = new cv.Mat();
-    cv.resize(src, resized, new cv.Size(sw, sh), 0, 0, cv.INTER_AREA);
-    let gray = new cv.Mat(); cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY);
-    cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
-    let edges = new cv.Mat(); cv.Canny(gray, edges, 60, 150);
-    // Stronger edges
-    let kernel = cv.Mat.ones(3,3, cv.CV_8U);
-    cv.dilate(edges, edges, kernel);
-
-    // Contours
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
-    cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-
-    let best = null; let bestScore = -1;
-    for (let i=0; i<contours.size(); i++) {
-      const cnt = contours.get(i);
-      const peri = cv.arcLength(cnt, true);
-      const approx = new cv.Mat();
-      cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
-      if (approx.rows !== 4) { approx.delete(); continue; }
-      const area = cv.contourArea(approx);
-      if (area < (sw*sh*0.1)) { approx.delete(); continue; } // zu klein
-      // Convex?
-      if (!cv.isContourConvex(approx)) { approx.delete(); continue; }
-
-      // Get points
-      const pts = [];
-      for (let j=0; j<4; j++) {
-        pts.push({ x: approx.intPtr(j,0)[0], y: approx.intPtr(j,0)[1] });
+  async function saveImage(blob, base='Tafel'){
+    const ts=new Date(), p=s=>String(s).padStart(2,'0');
+    const name = `${base}_${ts.getFullYear()}${p(ts.getMonth()+1)}${p(ts.getDate())}_${p(ts.getHours())}${p(ts.getMinutes())}${p(ts.getSeconds())}.png`;
+    if (dirHandle && haveFSAccess){
+      const perm = await dirHandle.requestPermission?.({mode:'readwrite'});
+      if (perm==='granted'){
+        const fh = await dirHandle.getFileHandle(name,{create:true});
+        const w = await fh.createWritable(); await w.write(blob); await w.close();
+        return {mode:'folder', name};
       }
-      // Order points (tl,tr,br,bl)
-      const ordered = orderQuad(pts);
+    }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); URL.revokeObjectURL(a.href); a.remove();
+    return {mode:'download', name};
+  }
 
-      // Aspect ratio near rectangular; score by area and rectangularity
-      const w1 = distP(ordered[0], ordered[1]);
-      const w2 = distP(ordered[3], ordered[2]);
-      const h1 = distP(ordered[0], ordered[3]);
-      const h2 = distP(ordered[1], ordered[2]);
-      const wAvg = (w1 + w2)/2, hAvg = (h1 + h2)/2;
-      const asp = wAvg / hAvg;
+  // ===== Image helpers =====
+  function drawFrameTo(canvas){
+    const c=canvas||document.createElement('canvas');
+    c.width=overlay.width; c.height=overlay.height;
+    c.getContext('2d', {willReadFrequently:true}).drawImage(video, 0,0, c.width, c.height);
+    return c;
+  }
+  function grayThumb(srcCanvas, tw=128, th=72){
+    const c=document.createElement('canvas'); c.width=tw; c.height=th;
+    const x=c.getContext('2d', {willReadFrequently:true});
+    x.drawImage(srcCanvas, 0,0, tw,th);
+    const id=x.getImageData(0,0,tw,th).data;
+    const out=new Float32Array(tw*th);
+    for(let i=0,j=0;i<id.length;i+=4,j++){ out[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255; }
+    return {data:out,w:tw,h:th};
+  }
+  function mse(a,b){ if(!a||!b||a.data.length!==b.data.length) return 1; let s=0; for(let i=0;i<a.data.length;i++){ const d=a.data[i]-b.data[i]; s+=d*d; } return s/a.data.length; }
 
-      const rectScore = 1 - Math.abs(w1-w2)/wAvg - Math.abs(h1-h2)/hAvg;
-      const areaScore = area / (sw*sh);
-      const arScore = (asp>0.8 && asp<2.2) ? 0.5 : 0.0; // weite Toleranz (Tafel/Beamer)
-      const score = areaScore + rectScore + arScore;
+  // ===== OpenCV utils =====
+  function orderTLTRBRBL(pts){
+    // robust: tl=min(x+y), br=max(x+y), tr=max(x-y), bl=min(x-y)
+    const bySum=[...pts].sort((a,b)=>(a.x+a.y)-(b.x+b.y));
+    const byDiff=[...pts].sort((a,b)=>(a.x-a.y)-(b.x-b.y));
+    const tl=bySum[0], br=bySum[bySum.length-1], tr=byDiff[byDiff.length-1], bl=byDiff[0];
+    return [tl,tr,br,bl];
+  }
+  function detectBoardQuad(frameCanvas, scale=0.5){
+    // returns [{x,y}*4] in overlay space or null
+    const w=frameCanvas.width, h=frameCanvas.height;
+    const sw=Math.max(320, Math.round(w*scale)), sh=Math.max(180, Math.round(h*scale));
+    const src=cv.imread(frameCanvas);
+    const resized=new cv.Mat(); cv.resize(src,resized,new cv.Size(sw,sh),0,0,cv.INTER_AREA);
+    const gray=new cv.Mat(); cv.cvtColor(resized,gray,cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray,gray,new cv.Size(5,5),0);
+    const edges=new cv.Mat(); cv.Canny(gray,edges,60,150);
+    const kernel=cv.Mat.ones(3,3,cv.CV_8U); cv.dilate(edges,edges,kernel);
 
-      if (score > bestScore) {
-        bestScore = score;
-        best = ordered.map(p => ({ x: p.x * (w/sw), y: p.y * (h/sh) })); // scale up
+    const contours=new cv.MatVector(), hierarchy=new cv.Mat();
+    cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+
+    let best=null, bestScore=-1;
+    for(let i=0;i<contours.size();i++){
+      const cnt=contours.get(i);
+      const peri=cv.arcLength(cnt,true);
+      const approx=new cv.Mat(); cv.approxPolyDP(cnt, approx, 0.02*peri, true);
+      if (approx.rows!==4){ approx.delete(); continue; }
+      const area=cv.contourArea(approx); if (area < sw*sh*0.12){ approx.delete(); continue; }
+      if (!cv.isContourConvex(approx)){ approx.delete(); continue; }
+
+      const pts=[]; const d=approx.data32S;
+      for(let j=0;j<d.length;j+=2) pts.push({x:d[j], y:d[j+1]});
+      const ord=orderTLTRBRBL(pts);
+      const w1=Math.hypot(ord[1].x-ord[0].x, ord[1].y-ord[0].y);
+      const w2=Math.hypot(ord[2].x-ord[3].x, ord[2].y-ord[3].y);
+      const h1=Math.hypot(ord[3].x-ord[0].x, ord[3].y-ord[0].y);
+      const h2=Math.hypot(ord[2].x-ord[1].x, ord[2].y-ord[1].y);
+      const wAvg=(w1+w2)/2, hAvg=(h1+h2)/2;
+      const rectScore=1 - Math.abs(w1-w2)/wAvg - Math.abs(h1-h2)/hAvg;
+      const areaScore=area/(sw*sh);
+      const ar=wAvg/hAvg; const arScore=(ar>0.8 && ar<2.2)?0.5:0.0;
+      const score=areaScore + rectScore + arScore;
+      if (score>bestScore){
+        bestScore=score;
+        best=ord.map(p=>({x:p.x*(w/sw), y:p.y*(h/sh)}));
       }
       approx.delete();
     }
-
-    src.delete(); resized.delete(); gray.delete(); edges.delete(); kernel.delete();
-    contours.delete(); hierarchy.delete();
+    src.delete(); resized.delete(); gray.delete(); edges.delete(); kernel.delete(); contours.delete(); hierarchy.delete();
     return best;
   }
-
-  function orderQuad(pts) {
-    // Return array [tl,tr,br,bl] from 4 points
-    // Compute centroid
-    const cx = pts.reduce((s,p)=>s+p.x,0)/4, cy = pts.reduce((s,p)=>s+p.y,0)/4;
-    return pts.sort((a,b)=>{
-      const angA = Math.atan2(a.y - cy, a.x - cx);
-      const angB = Math.atan2(b.y - cy, b.x - cx);
-      return angA - angB;
-    }).reduce((acc,p)=>acc, pts).slice() // just to avoid lints
-    // More robust ordering:
-    .sort((a,b)=> (a.y+a.x) - (b.y+b.x)) // tl minimal sum likely first
+  function computeHomography(q){
+    const [tl,tr,br,bl]=orderTLTRBRBL(q);
+    const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,[ tl.x,tl.y, tr.x,tr.y, br.x,br.y, bl.x,bl.y ]);
+    const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,[ 0,0, targetW,0, targetW,targetH, 0,targetH ]);
+    const H=cv.getPerspectiveTransform(srcTri,dstTri); srcTri.delete(); dstTri.delete(); return H;
+  }
+  function warpBoard(frameCanvas, H){
+    const src=cv.imread(frameCanvas); const dst=new cv.Mat();
+    cv.warpPerspective(src, dst, new cv.Size(targetW,targetH), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
+    const out=document.createElement('canvas'); out.width=targetW; out.height=targetH; cv.imshow(out,dst);
+    src.delete(); dst.delete(); return out;
   }
 
-  function distP(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+  // ===== Loop =====
+  async function processingLoop(){
+    const cvOk = await ensureCV(); // OpenCV evtl. aus
+    let frameIdx=0;
+    let lastMotion=null; const MOTION_T=0.18, MOTION_FRAC=0.035;
 
-  function drawQuad(q, color= 'rgba(78,161,255,0.9)') {
-    if (!q) return;
-    ctxOv.save();
-    ctxOv.clearRect(0,0,overlay.width, overlay.height);
-    ctxOv.lineWidth = 3;
-    ctxOv.strokeStyle = color;
-    ctxOv.fillStyle = 'rgba(78,161,255,0.15)';
-    ctxOv.beginPath();
-    ctxOv.moveTo(q[0].x, q[0].y);
-    ctxOv.lineTo(q[1].x, q[1].y);
-    ctxOv.lineTo(q[2].x, q[2].y);
-    ctxOv.lineTo(q[3].x, q[3].y);
-    ctxOv.closePath();
-    ctxOv.stroke();
-    ctxOv.fill();
-    ctxOv.restore();
-  }
+    const step = async ()=>{
+      if (!mediaStream){ loopRunning=false; return; }
+      updateFps();
 
-  function computeHomography(q) {
-    // q: [{x,y}*4] overlay space; order: tl,tr,br,bl (we’ll best-effort)
-    const ordered = orderTLTRBRBL(q);
-    const srcTri = cv.matFromArray(4,1,cv.CV_32FC2, [
-      ordered[0].x, ordered[0].y,
-      ordered[1].x, ordered[1].y,
-      ordered[2].x, ordered[2].y,
-      ordered[3].x, ordered[3].y
-    ]);
-    const dstTri = cv.matFromArray(4,1,cv.CV_32FC2, [
-      0, 0,  targetW, 0,  targetW, targetH,  0, targetH
-    ]);
-    const H = cv.getPerspectiveTransform(srcTri, dstTri);
-    srcTri.delete(); dstTri.delete();
-    return H;
-  }
+      const ow=overlay.width, oh=overlay.height;
+      if (ow>0 && oh>0){
+        const frame=drawFrameTo(); // canvas
+        if (cvOk){
+          // Board-Detect nicht jeden Frame
+          if (!boardFound || (frameIdx%10===0)){
+            const q = detectBoardQuad(frame, 0.5);
+            if (q){ boardQuad=q; boardFound=true; if (H_warp) H_warp.delete(); H_warp=computeHomography(boardQuad); }
+            else { boardFound=false; boardQuad=null; if (H_warp){ H_warp.delete(); H_warp=null; } }
+          }
+          // zeichnen
+          ctxOv.clearRect(0,0,ow,oh);
+          if (boardQuad){
+            ctxOv.lineWidth=3; ctxOv.strokeStyle='rgba(78,161,255,0.9)'; ctxOv.fillStyle='rgba(78,161,255,0.15)';
+            ctxOv.beginPath(); ctxOv.moveTo(boardQuad[0].x,boardQuad[0].y);
+            for(let i=1;i<4;i++) ctxOv.lineTo(boardQuad[i].x,boardQuad[i].y);
+            ctxOv.closePath(); ctxOv.stroke(); ctxOv.fill();
+          }
+          stBoard.textContent=boardFound?'ja':'nein'; stBoard.className=boardFound?'ok':'bad';
 
-  function orderTLTRBRBL(pts) {
-    // Sort robustly into tl,tr,br,bl
-    const bySum = [...pts].sort((a,b)=> (a.x+a.y) - (b.x+b.y)); // tl (min sum), br (max sum)
-    const byDiff = [...pts].sort((a,b)=> (a.x-a.y) - (b.x-b.y)); // tr (max diff), bl (min diff)
-    const tl = bySum[0];
-    const br = bySum[bySum.length - 1];
-    const tr = byDiff[byDiff.length - 1];
-    const bl = byDiff[0];
-    return [tl,tr,br,bl];
-  }
+          // Change + Blocker nur wenn Board da ist
+          if (boardFound && H_warp){
+            const warped = warpBoard(frame, H_warp);
+            const thumb = grayThumb(warped, 128, 72);
+            let diffVal = prevThumb ? mse(thumb, prevThumb) : null;
+            prevThumb = thumb;
 
-  function warpBoard(frameCanvas, H) {
-    const src = cv.imread(frameCanvas);
-    const dst = new cv.Mat();
-    const M = H;
-    cv.warpPerspective(src, dst, new cv.Size(targetW, targetH), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
-    // Convert to canvas
-    const out = document.createElement('canvas');
-    out.width = targetW; out.height = targetH;
-    cv.imshow(out, dst);
-    src.delete(); dst.delete();
-    return out;
-  }
+            // Motion-Blocker (innerhalb Board, approximiert über diff zwischen zwei Thumbs)
+            if (!lastMotion) lastMotion = grayThumb(warped, 128, 72);
+            const curM = grayThumb(warped, 128, 72);
+            let changes=0; for(let i=0;i<curM.data.length;i++){ if (Math.abs(curM.data[i]-lastMotion.data[i])>MOTION_T) changes++; }
+            const frac = changes / curM.data.length; const motionBlock = frac > MOTION_FRAC;
+            lastMotion = curM;
 
-  // ======== Processing loop ========
-  let loopRunning = false;
-  async function startProcessingLoop() {
-    if (loopRunning) return;
-    await waitForCV();
-    loopRunning = true;
-    stModels.textContent = 'OpenCV, Motion';
+            stDiff.textContent = (diffVal!==null)?fmt(diffVal,3):'—';
+            stBlock.textContent = tglBlocker.checked ? (motionBlock?'blockiert':'frei') : 'aus';
+            stBlock.className = tglBlocker.checked ? (motionBlock?'bad':'ok') : 'warn';
 
-    // Persist toggles
-    const mem = store.load();
-    if (mem?.auto !== undefined) tglAuto.checked = mem.auto;
-    if (mem?.boardChange !== undefined) tglBoardChange.checked = mem.boardChange;
-    if (mem?.blocker !== undefined) tglBlocker.checked = mem.blocker;
+            const now=performance.now();
+            const stable = (now - lastChangeTs) > STABLE_MS;
+            if (tglBoardChange.checked && diffVal!==null && diffVal>CHANGE_THRESH && stable){
+              lastChangeTs = now;
+              if (SHOW_DEBUG) { debugBox.textContent=`Folien: Änderung (diff=${fmt(diffVal,3)})`; debugBox.style.display='block'; clearTimeout(processingLoop._dt); processingLoop._dt=setTimeout(()=>debugBox.style.display='none', 1000); }
+            }
 
-    const proc = async () => {
-      if (!mediaStream) { loopRunning = false; return; }
-
-      // Calc FPS
-      fpsCounter.frames++;
-      const now = performance.now();
-      if (now - fpsCounter.last >= 1000) {
-        fpsCounter.fps = fpsCounter.frames;
-        fpsCounter.frames = 0;
-        fpsCounter.last = now;
-        kpiFps.textContent = `FPS: ${fpsCounter.fps}`;
-      }
-
-      // Draw current frame to canvas at screen size (overlay)
-      const { width: ow, height: oh } = overlay;
-      if (ow < 2 || oh < 2) { requestAnimationFrame(proc); return; }
-      const c = document.createElement('canvas');
-      c.width = ow; c.height = oh;
-      const cx = c.getContext('2d', { willReadFrequently: true });
-      cx.drawImage(video, 0, 0, ow, oh);
-
-      // 1) Board detect (periodisch, nicht jeden Frame)
-      if (!boardFound || (now % 5 < 1)) { // ~re-check
-        const quad = detectBoardQuad(c, 0.5);
-        if (quad) {
-          boardQuad = quad;
-          boardFound = true;
-          H_warp = computeHomography(boardQuad);
+            // Auto Capture
+            if (tglAuto.checked && diffVal!==null && diffVal>CHANGE_THRESH && stable){
+              const cooldown = (now - (processingLoop._lastCap||0)) > COOLDOWN_MS;
+              const blockCond = tglBlocker.checked ? !motionBlock : true;
+              const faceCond = await faceBlockVerdict(frame); // optional
+              if (cooldown && blockCond && !faceCond){
+                await captureAndSave('Auto');
+                processingLoop._lastCap = performance.now();
+              }
+            }
+          } else {
+            ctxOv.clearRect(0,0,ow,oh);
+            stDiff.textContent='—';
+          }
         } else {
-          boardFound = false; boardQuad = null;
-          if (H_warp) { H_warp.delete(); H_warp = null; }
+          // Kein CV: nur Live-Bild, manueller Snap möglich
+          ctxOv.clearRect(0,0,ow,oh);
+          stBoard.textContent='nein'; stBoard.className='bad';
+          stDiff.textContent='—'; stModels.textContent='(ohne OpenCV)';
         }
       }
 
-      // Draw overlay
-      ctxOv.clearRect(0,0,ow,oh);
-      drawQuad(boardQuad, boardFound ? 'rgba(78,161,255,0.9)' : 'rgba(180,70,70,0.8)');
-      stBoard.textContent = boardFound ? 'ja' : 'nein';
-      stBoard.className = boardFound ? 'ok' : 'bad';
-
-      // 2) Change detection & blockers (only if boardFound)
-      let diffVal = null;
-      let motionBlock = false;
-      if (boardFound && H_warp) {
-        const warped = warpBoard(c, H_warp);
-        // Motion blocker (simple): compute sum of abs diff to previous warped thumb
-        const thumb = toGrayThumb(warped, 128, 72);
-        if (prevBoardThumb) {
-          diffVal = mse(thumb, prevBoardThumb); // 0..1
-        }
-        prevBoardThumb = thumb;
-
-        // Motion mask within board for blocker:
-        // Downscale further & compute fraction of pixels with |Δ|>t
-        if (diffVal !== null) {
-          const th = 0.18; // per-pixel diff threshold
-          let cnt=0, total=thumb.data.length;
-          const a = thumb.data, b = prevBoardThumb.data; // Note: prev has been set to thumb; for motion, we need 2-step
-          // We need the previous of previous — quick workaround: use a retained last snapshot:
-          // We'll keep lastMotionThumb separately
-        }
-
-        // Keep a separate last frame for motion:
-        if (!startProcessingLoop._lastMotion) startProcessingLoop._lastMotion = toGrayThumb(warped, 128, 72);
-        const last = startProcessingLoop._lastMotion;
-        const cur = toGrayThumb(warped, 128, 72);
-        let changeCount = 0;
-        for (let i=0; i<cur.data.length; i++) {
-          if (Math.abs(cur.data[i] - last.data[i]) > 0.18) changeCount++;
-        }
-        const frac = changeCount / cur.data.length;
-        motionBlock = frac > MOTION_BLOCK_FRAC;
-        startProcessingLoop._lastMotion = cur;
-
-        // Update UI
-        stDiff.textContent = diffVal !== null ? format(diffVal,3) : '—';
-        stBlock.textContent = tglBlocker.checked ? (motionBlock ? 'blockiert' : 'frei') : 'aus';
-        stBlock.className = tglBlocker.checked ? (motionBlock ? 'bad' : 'ok') : 'warn';
-
-        // 3) Auto capture logic
-        if (tglBoardChange.checked && diffVal !== null) {
-          const stable = (now - lastChangeTs) > CHANGE_STABLE_MS;
-          const cooldown = (now - (startProcessingLoop._lastCaptureTs || 0)) > CHANGE_COOLDOWN_MS;
-          const condChanged = diffVal > CHANGE_THRESH;
-          const condBlock = tglBlocker.checked ? !motionBlock : true;
-          const condFace = await faceBlockVerdict(c); // checks tglFace inside
-
-          if (condChanged && stable) {
-            lastChangeTs = now;
-            // Show quick indicator
-            if (SHOW_DEBUG) showDebug(`Folien: Änderung (diff=${format(diffVal,3)})`);
-          }
-
-          if (tglAuto.checked && condChanged && cooldown && condBlock && !condFace) {
-            await captureAndSave('Auto');
-            startProcessingLoop._lastCaptureTs = performance.now();
-          }
-        }
-
-        warped.width = warped.width; // allow GC
-      } else {
-        stDiff.textContent = '—';
-      }
-
-      // Persist toggles occasionally
-      if (now % 60 < 1) {
-        const cfg = store.load();
-        cfg.auto = tglAuto.checked;
-        cfg.boardChange = tglBoardChange.checked;
-        cfg.blocker = tglBlocker.checked;
-        store.save(cfg);
-      }
-
-      requestAnimationFrame(proc);
+      frameIdx++;
+      requestAnimationFrame(step);
     };
-    requestAnimationFrame(proc);
+    requestAnimationFrame(step);
   }
 
-  function showDebug(text) {
-    debugBox.style.display = 'block';
-    debugBox.textContent = text;
-    clearTimeout(showDebug._t);
-    showDebug._t = setTimeout(()=>{ debugBox.style.display='none'; }, 1200);
-  }
-
-  // ======== Face blocker (optional, lazy load) ========
-  async function ensureFaceModel() {
+  // ===== Face blocker (lazy) =====
+  let faceModel=null, tfLoaded=false, blazeLoaded=false;
+  async function ensureFaceModel(){
     if (faceModel) return true;
-    if (!tfLoaded) {
-      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js');
-      tfLoaded = true;
-    }
-    if (!blazefaceLoaded) {
-      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js');
-      blazefaceLoaded = true;
-    }
-    if (window.blazeface) {
-      faceModel = await blazeface.load();
-      stModels.textContent = 'OpenCV, Motion, BlazeFace';
-      return true;
-    }
+    if (!tfLoaded){ await import('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); tfLoaded=true; }
+    if (!blazeLoaded){ await import('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }
+    if (window.blazeface){ faceModel = await blazeface.load(); stModels.textContent += ', BlazeFace'; return true; }
     return false;
   }
-
-  async function faceBlockVerdict(frameCanvas) {
+  async function faceBlockVerdict(frameCanvas){
     if (!tglFace.checked) return false;
-    try {
-      const ok = await ensureFaceModel();
-      if (!ok) return false;
+    try{ const ok=await ensureFaceModel(); if (!ok||!boardQuad) return false;
       const preds = await faceModel.estimateFaces(frameCanvas, false);
-      if (!preds || !preds.length || !boardQuad) return false;
-
-      // If any face center lies inside quad => block
-      const poly = boardQuad;
-      for (const p of preds) {
-        const box = p.topLeft && p.bottomRight ? [p.topLeft, p.bottomRight] : null;
-        if (!box) continue;
-        const cx = (box[0][0] + box[1][0]) / 2;
-        const cy = (box[0][1] + box[1][1]) / 2;
-        if (pointInQuad({x:cx,y:cy}, poly)) {
-          return true;
-        }
+      if (!preds?.length) return false;
+      // Center inside board?
+      for (const p of preds){
+        if (!p.topLeft || !p.bottomRight) continue;
+        const cx=(p.topLeft[0]+p.bottomRight[0])/2, cy=(p.topLeft[1]+p.bottomRight[1])/2;
+        if (pointInQuad({x:cx,y:cy}, boardQuad)) return true;
       }
-    } catch (e) {
-      console.warn('faceBlock error', e);
-    }
+    }catch(e){ console.warn('faceBlock',e); }
     return false;
   }
-
-  function pointInQuad(pt, quad) {
-    // Barycentric via area
-    const area = polyArea(quad);
-    const a1 = triArea(pt, quad[0], quad[1]);
-    const a2 = triArea(pt, quad[1], quad[2]);
-    const a3 = triArea(pt, quad[2], quad[3]);
-    const a4 = triArea(pt, quad[3], quad[0]);
-    const s = a1+a2+a3+a4;
-    return Math.abs(s - area) < 1e-1 * area;
-  }
-  function polyArea(q) { return triArea(q[0],q[1],q[2]) + triArea(q[0],q[2],q[3]); }
   function triArea(a,b,c){ return Math.abs((a.x*(b.y-c.y)+b.x*(c.y-a.y)+c.x*(a.y-b.y))/2); }
+  function polyArea(q){ return triArea(q[0],q[1],q[2])+triArea(q[0],q[2],q[3]); }
+  function pointInQuad(p,q){ const A=polyArea(q); const s=triArea(p,q[0],q[1])+triArea(p,q[1],q[2])+triArea(p,q[2],q[3])+triArea(p,q[3],q[0]); return Math.abs(s-A)<1e-1*A; }
 
-  // ======== Capture ========
-  async function captureAndSave(prefix='Tafel') {
-    if (!boardFound || !H_warp) {
-      // Fallback: full frame capture
-      const { canvas } = drawToCanvas(video, overlay.width, overlay.height);
-      const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 1));
-      const r = await saveImage(blob, prefix+'_Full');
-      showDebug(`Foto gespeichert (${r.mode})`);
-      return;
+  // ===== Capture =====
+  async function captureAndSave(prefix='Tafel'){
+    let outCanvas=null;
+    if (boardFound && H_warp && typeof cv!=='undefined' && cv?.Mat){
+      const frame=drawFrameTo();
+      outCanvas = warpBoard(frame, H_warp);
+    } else {
+      outCanvas = drawFrameTo();
     }
-    // Warp current frame to board plane
-    const c = document.createElement('canvas');
-    c.width = overlay.width; c.height = overlay.height;
-    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
-
-    const warped = warpBoard(c, H_warp);
-    // Export PNG
-    const blob = await new Promise(res => warped.toBlob(res, 'image/png', 0.95));
+    const blob = await new Promise(res=> outCanvas.toBlob(res, 'image/png', 0.95));
     const r = await saveImage(blob, prefix);
-    showDebug(`Foto gespeichert (${r.mode})`);
-
-    // Optional OCR
-    if (tglOCR.checked) {
-      await ensureOCR();
-      runOCR(warped);
-    }
+    showBanner(`Foto gespeichert (${r.mode})`, 'ok', 1800);
+    if (tglOCR.checked){ await ensureOCR(); runOCR(outCanvas); }
   }
 
-  // ======== OCR (optional, lazy) ========
-  async function ensureOCR() {
-    if (tesseractLoaded) return true;
-    await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
-    tesseractLoaded = true;
-    stModels.textContent += ', OCR';
-  }
-
-  async function runOCR(canvas) {
-    try {
-      const worker = await Tesseract.createWorker('deu'); // deutsch
-      const { data: { text } } = await worker.recognize(canvas);
+  // ===== OCR (lazy) =====
+  let tessLoaded=false;
+  async function ensureOCR(){ if (tessLoaded) return; await import('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; stModels.textContent+=', OCR'; }
+  async function runOCR(canvas){
+    try{
+      const worker = await Tesseract.createWorker('deu');
+      const { data:{ text } } = await worker.recognize(canvas);
       await worker.terminate();
+      if (SHOW_DEBUG){ debugBox.textContent='OCR:\n'+(text||'—'); debugBox.style.display='block'; clearTimeout(runOCR._t); runOCR._t=setTimeout(()=>debugBox.style.display='none', 2500); }
       console.log('OCR:', text);
-      showDebug('OCR erkannt (Konsole)');
-    } catch (e) {
-      console.warn('OCR error', e);
-    }
+    }catch(e){ console.warn('OCR',e); }
   }
 
-  // ======== Events ========
-  on(btnStart, 'click', () => startCamera());
-  on(selCam, 'change', () => startCamera(selCam.value));
-  on(btnSnap, 'click', () => captureAndSave('Manuell'));
-  on(btnDir, 'click', chooseDirectory);
-  on(tglAuto, 'change', () => { stAuto.textContent = tglAuto.checked ? 'an' : 'aus'; stAuto.className = tglAuto.checked ? 'ok' : 'warn'; });
-
-  // Keyboard shortcuts
-  on(document, 'keydown', (e) => {
-    if (e.key.toLowerCase() === 'd') { SHOW_DEBUG = !SHOW_DEBUG; debugBox.style.display = SHOW_DEBUG ? 'block' : 'none'; }
-    if (e.key === '+') zoomSlider.value = Math.min(10, parseFloat(zoomSlider.value)+0.1), applyZoom(parseFloat(zoomSlider.value));
-    if (e.key === '-') zoomSlider.value = Math.max(1, parseFloat(zoomSlider.value)-0.1), applyZoom(parseFloat(zoomSlider.value));
-    if (e.key.toLowerCase() === 'c') captureAndSave('Manuell');
+  // ===== Events =====
+  on(btnStart,'click',()=>startCamera());
+  on(selCam,'change',()=>startCamera(selCam.value));
+  on(btnSnap,'click',()=>captureAndSave('Manuell'));
+  on(btnDir,'click',chooseDirectory);
+  on(tglAuto,'change',()=>{ stAuto.textContent=tglAuto.checked?'an':'aus'; stAuto.className=tglAuto.checked?'ok':'warn'; });
+  on(document,'keydown',(e)=>{
+    if (e.key.toLowerCase()==='d'){ SHOW_DEBUG=!SHOW_DEBUG; debugBox.style.display = SHOW_DEBUG?'block':'none'; }
+    if (e.key.toLowerCase()==='c'){ captureAndSave('Manuell'); }
+    if (e.key==='+'){ const z=clamp(parseFloat(zoomSlider.value)+0.1,1,10); zoomSlider.value=z; applyZoom(z); }
+    if (e.key==='-'){ const z=clamp(parseFloat(zoomSlider.value)-0.1,1,10); zoomSlider.value=z; applyZoom(z); }
   });
 
-  // Init UI
-  (async function init() {
-    stAuto.textContent = tglAuto.checked ? 'an' : 'aus';
-    stAuto.className = tglAuto.checked ? 'ok' : 'warn';
+  // ===== Init =====
+  (async function init(){
+    stAuto.textContent='aus'; stAuto.className='warn';
     saveMode.innerHTML = haveFSAccess ? 'Speichern: <b>Download / Ordner</b>' : 'Speichern: <b>Download</b>';
-    // try to list cams (labels hidden until permission)
-    try { await listCameras(); } catch {}
-    // Apply initial zoom label
-    zoomInfo.textContent = `Anzeige ${format(displayZoom,2)}× | HW —`;
+    zoomInfo.textContent = `Anzeige ${fmt(displayZoom,2)}× | HW —`;
+    try{ await listCameras(); }catch{}
+    // Zeige, ob OpenCV grundsätzlich geladen werden kann
+    ensureCV().then(ok=>{ if(!ok){ // Deaktiviere Auto/Blocker automatisch
+        tglBoardChange.checked=false; tglAuto.checked=false; tglFace.checked=false; 
+        showBanner('OpenCV nicht bereit – Auto/Erkennung deaktiviert', 'warn', 5000);
+      }
+    });
   })();
   </script>
 </body>

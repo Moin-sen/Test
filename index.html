@@ -14,7 +14,7 @@
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, Noto Sans, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", sans-serif; background: var(--bg); color: var(--fg); }
     button, select, input[type="checkbox"] { font: inherit }
 
-    /* Responsive Layout: portrait vs. landscape based on uploaded mockups */
+    /* Responsive Layout: portrait vs. landscape */
     .app { display: grid; gap: .75rem; padding: .75rem; height: 100vh; }
     @media (orientation: portrait) {
       .app { grid-template-rows: auto 1fr auto; grid-template-columns: 1fr; }
@@ -39,9 +39,11 @@
     .toggle { display:flex; align-items:center; gap:.4rem; }
 
     .stage { position: relative; }
-    video, canvas { width:100%; height:100%; object-fit: contain; background: #000; border-radius: 10px; }
+    /* WICHTIG: nur das Video hat einen schwarzen Hintergrund – das Overlay ist transparent */
+    video { width:100%; height:100%; object-fit: contain; background: #000; border-radius: 10px; }
+    canvas { width:100%; height:100%; object-fit: contain; border-radius: 10px; }
     #preview { position:absolute; inset:0; }
-    #overlay { position:absolute; inset:0; pointer-events:none; }
+    #overlay { position:absolute; inset:0; pointer-events:none; background: transparent; } /* <-- fix */
 
     .status { display:grid; grid-template-columns: 1fr 1fr; gap:.35rem; font-size:.85rem; color:var(--muted) }
     .status div { background:#11151d; border:1px solid var(--border); border-radius:8px; padding:.35rem .5rem; }
@@ -111,7 +113,6 @@
     </div>
   </div>
 
-  <!-- External libs are loaded lazily by JS when needed to reduce startup cost. -->
   <script>
   (function(){
     const qs = sel => document.querySelector(sel);
@@ -168,12 +169,12 @@
       return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
     }
 
-    // ==== KAMERA: FIXED START ====
+    // ==== Kamera (mit Fallback & Autoplay-Fix) ====
     async function startCamera() {
       try {
         stopCamera();
 
-        // Sicher für Mobile: verhindert Autoplay-Blockaden
+        // Mobile: Autoplay/Inline sicherstellen
         video.setAttribute('playsinline', '');
         video.muted = true;
         video.autoplay = true;
@@ -184,20 +185,17 @@
           return;
         }
 
-        // Bevorzugt Rückkamera + moderate Auflösung; bei Fehler sauberer Fallback
+        // Rückkamera bevorzugen + moderat; Fallback wenn nötig
         const preferred = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false };
         try {
           stream = await navigator.mediaDevices.getUserMedia(preferred);
         } catch (e1) {
           console.warn('[Camera] preferred failed:', e1?.name || e1);
-          // Minimaler Fallback – nimmt, was verfügbar ist
           stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         }
 
-        // Stream binden
         video.srcObject = stream;
 
-        // Auflösung/Canvas erst setzen, wenn Metadaten da sind (verhindert 0×0/Schwarz)
         const applyMeta = () => {
           const w = video.videoWidth  || overlay.clientWidth  || 1280;
           const h = video.videoHeight || overlay.clientHeight || 720;
@@ -208,12 +206,7 @@
         if (video.readyState >= 1) applyMeta();
         else video.addEventListener('loadedmetadata', applyMeta, { once: true });
 
-        try {
-          await video.play(); // bei Mobile evtl. 2. Tap nötig, aber muted+playsinline hilft
-        } catch (ePlay) {
-          console.warn('[Camera] play() blocked:', ePlay?.name || ePlay);
-          // Keine UI-Änderung – erneutes Tippen auf "Kamera starten" reicht
-        }
+        try { await video.play(); } catch (ePlay) { console.warn('[Camera] play() blocked:', ePlay?.name || ePlay); }
 
         btnShot.disabled = false;
         permCam.textContent = 'Kamera: ok'; permCam.className = 'pill ok';
@@ -226,26 +219,21 @@
         alert('Kamera konnte nicht gestartet werden: ' + (e.message || e));
       }
     }
-    // ==== KAMERA: FIXED ENDE ====
 
     function stopCamera() {
       cancelAnimationFrame(animId);
       if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
       btnShot.disabled = true;
-      // Optional: Overlay leeren (sichtbar nur bei Transparenz)
-      // ctx.clearRect(0,0,overlay.width, overlay.height);
+      // Overlay-Inhalt löschen (bleibt transparent)
+      ctx.clearRect(0,0,overlay.width, overlay.height);
     }
 
     async function detectTorchSupport() {
       try {
         const track = stream?.getVideoTracks?.()[0];
         const caps = track?.getCapabilities?.();
-        if (caps && 'torch' in caps) {
-          btnTorch.disabled = false;
-        } else {
-          btnTorch.disabled = true;
-        }
-      } catch {}
+        btnTorch.disabled = !(caps && 'torch' in caps);
+      } catch { btnTorch.disabled = true; }
     }
 
     btnTorch.addEventListener('click', async () => {
@@ -263,7 +251,7 @@
 
     btnStart.addEventListener('click', startCamera);
 
-    // Directory picker & saving
+    // Ordnerwahl & Speichern
     async function chooseDirectory() {
       if (!('showDirectoryPicker' in window)) {
         alert('Ordnerwahl wird von diesem Browser nicht unterstützt. Es wird der Downloads-Fallback genutzt.');
@@ -283,13 +271,11 @@
         }
       } catch (e) {
         console.warn(e);
-        // user aborted or not supported
       }
     }
     btnChooseDir.addEventListener('click', chooseDirectory);
 
     async function saveBlob(name, blob) {
-      // Preferred: write to chosen directory
       if (dirHandle) {
         try {
           const fileHandle = await dirHandle.getFileHandle(name, { create: true });
@@ -313,13 +299,40 @@
       return false;
     }
 
+    // ==== WICHTIGER FIX: Capture nutzt Offscreen-Canvas, nicht das Overlay ====
+    async function captureAndRectify() {
+      if (!stream) return null;
+
+      // Offscreen‑Canvas in Video‑Auflösung
+      const w = overlay.width, h = overlay.height;
+      const cap = document.createElement('canvas');
+      cap.width = w; cap.height = h;
+      const capCtx = cap.getContext('2d', { willReadFrequently: true });
+      capCtx.drawImage(video, 0, 0, w, h);
+
+      // OpenCV auf dem Offscreen-Canvas
+      const mat = cv.imread(cap);
+      let quad = boardQuad || findBoardQuad(mat);
+      let roi = quad ? warpToBoard(mat, quad) : mat.clone();
+
+      // JPEG erzeugen
+      const out = document.createElement('canvas');
+      out.width = roi.cols; out.height = roi.rows;
+      cv.imshow(out, roi);
+      const blob = await new Promise(res => out.toBlob(res, 'image/jpeg', 0.9));
+
+      mat.delete(); roi.delete();
+      return blob;
+    }
+    // ==========================================================================
+
     btnShot.addEventListener('click', async () => {
       const shot = await captureAndRectify();
       if (!shot) return;
       await saveBlob(`tafel_${ts()}.jpg`, shot);
     });
 
-    // Lazy loaders
+    // Lazy Loader
     let cvReady = false; let cvLoading = false;
     function loadOpenCV() {
       if (cvReady || cvLoading) return;
@@ -328,7 +341,6 @@
       s.src = 'https://docs.opencv.org/4.x/opencv.js';
       s.async = true;
       s.onload = () => {
-        // OpenCV sets global cv; wait until runtime is ready
         const check = () => { if (cv && cv['onRuntimeInitialized']) { cv['onRuntimeInitialized'] = () => { cvReady = true; }; } };
         try { check(); } catch {}
         setTimeout(() => { if (!cvReady && cv && cv.Mat) cvReady = true; }, 1500);
@@ -341,11 +353,9 @@
       if (segmenter) return segmenter;
       if (tfLoading) { while(!segmenter) { await new Promise(r=>setTimeout(r,100)); } return segmenter; }
       tfLoading = true;
-      // Load TF.js and body-segmentation
       await import('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js');
       const mod = await import('https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js');
       const bs = mod.bodySegmentation;
-      // Use MediaPipe selfie segmentation (fast)
       segmenter = await bs.createSegmenter(bs.SupportedModels.MediaPipeSelfieSegmentation, {
         runtime: 'tfjs', modelType: 'landscape', enableSegmentationSmoothing: true
       });
@@ -356,7 +366,6 @@
 
     // Board detection & rectification using OpenCV.js
     function findBoardQuad(mat) {
-      // mat: cv.Mat (RGBA)
       const src = new cv.Mat(); cv.cvtColor(mat, src, cv.COLOR_RGBA2GRAY);
       cv.GaussianBlur(src, src, new cv.Size(5,5), 0);
       const edges = new cv.Mat(); cv.Canny(src, edges, 50, 150);
@@ -384,7 +393,6 @@
     }
 
     function orderQuad(pts){
-      // Return [tl,tr,br,bl]
       pts.sort((a,b)=>a.y-b.y);
       const top = pts.slice(0,2).sort((a,b)=>a.x-b.x);
       const bot = pts.slice(2).sort((a,b)=>a.x-b.x);
@@ -409,49 +417,30 @@
       return dst;
     }
 
-    function drawQuad(q) { if (!q) return; ctx.save(); ctx.clearRect(0,0,overlay.width, overlay.height); ctx.strokeStyle = 'rgba(76,201,240,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(q[0].x,q[0].y); for (let i=1;i<q.length;i++) ctx.lineTo(q[i].x,q[i].y); ctx.closePath(); ctx.stroke(); ctx.restore(); }
+    function drawQuad(q) {
+      if (!q) { ctx.clearRect(0,0,overlay.width, overlay.height); return; }
+      ctx.save();
+      ctx.clearRect(0,0,overlay.width, overlay.height);
+      ctx.strokeStyle = 'rgba(76,201,240,0.9)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(q[0].x,q[0].y); for (let i=1;i<q.length;i++) ctx.lineTo(q[i].x,q[i].y);
+      ctx.closePath(); ctx.stroke(); ctx.restore();
+    }
 
     function thumb64Gray(mat) {
-      // returns Uint8Array length 4096 (64*64)
       const dst = new cv.Mat(); const size = new cv.Size(64,64);
       cv.resize(mat, dst, size, 0,0, cv.INTER_AREA);
       const gray = new cv.Mat(); cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY);
       const arr = new Uint8Array(64*64);
-      const srcData = gray.data; arr.set(srcData);
+      arr.set(gray.data);
       dst.delete(); gray.delete();
       return arr;
     }
 
     function diffPercent(a,b){
       let sum=0; for (let i=0;i<a.length;i++){ sum += Math.abs(a[i]-b[i]); }
-      // max diff per pixel 255 -> normalize
       return (sum / (a.length*255)) * 100;
-    }
-
-    async function captureAndRectify() {
-      if (!stream) return null;
-      // draw current frame to an offscreen canvas
-      const w = overlay.width, h = overlay.height;
-      ctx.drawImage(video, 0,0, w,h);
-      // to OpenCV mat
-      const mat = cv.imread(overlay);
-      let quad = boardQuad;
-      if (!quad) {
-        quad = findBoardQuad(mat);
-      }
-      let roi = null;
-      if (quad) {
-        roi = warpToBoard(mat, quad);
-      } else {
-        roi = mat.clone();
-      }
-      // Encode JPEG via canvas
-      const can = document.createElement('canvas');
-      can.width = roi.cols; can.height = roi.rows;
-      cv.imshow(can, roi);
-      const blob = await new Promise(res => can.toBlob(res, 'image/jpeg', 0.9));
-      mat.delete(); roi.delete();
-      return blob;
     }
 
     async function ensureLibs() {
@@ -462,16 +451,17 @@
     async function runLoop() {
       await ensureLibs();
       const w = overlay.width, h = overlay.height;
+      // Offscreen-Canvas für Detection (spart Repaints)
       const capCanvas = document.createElement('canvas'); capCanvas.width=w; capCanvas.height=h; const capCtx = capCanvas.getContext('2d');
 
       const tick = async () => {
         animId = requestAnimationFrame(tick);
         if (!stream) return;
-        // draw
-        ctx.clearRect(0,0,w,h);
-        // overlay updated by drawQuad later
 
-        // every ~250ms run detection to save battery
+        // Overlay leer (bleibt transparent)
+        ctx.clearRect(0,0,w,h);
+
+        // ~alle 250ms analysieren
         const now = performance.now();
         const doDetect = (now - lastQuadAt) > 250;
         if (doDetect && cv && cvReady) {
@@ -481,11 +471,10 @@
           if (found) { boardQuad = found; lastQuadAt = now; kvBoard.textContent = 'ja'; } else { kvBoard.textContent = 'nein'; }
           drawQuad(boardQuad);
 
-          // Person detection (optional)
+          // Personenerkennung (optional)
           if (cbPerson.checked && segmenter) {
             try {
               const seg = await segmenter.segmentPeople(video, { multiSegmentation: false });
-              // For simplicity count any person pixels proportion > 1.5%
               const any = seg && seg.length>0 && seg[0].mask;
               if (any) {
                 const { width: mw, height: mh, data } = seg[0].mask;
@@ -502,7 +491,7 @@
           statePerson.textContent = 'Person: ' + (personPresent? 'ja' : 'nein');
           statePerson.className = 'pill ' + (personPresent? 'warn' : 'ok');
 
-          // Slide change detection (optional)
+          // Folienänderung
           let changed = false;
           if (cbSlide.checked) {
             let roi = null;
@@ -526,7 +515,7 @@
             if (roi!==mat) roi.delete();
           }
 
-          // Auto capture: only when slide changed AND no person visible
+          // Auto Capture
           if (changed && !personPresent) {
             const blob = await captureAndRectify();
             if (blob) await saveBlob(`tafel_${ts()}.jpg`, blob);
@@ -535,7 +524,7 @@
           mat.delete();
         }
 
-        // FPS meter
+        // FPS
         frames++; if (now - lastFpsT > 1000) { pillFPS.textContent = `${frames} FPS`; frames = 0; lastFpsT = now; }
       };
       tick();
@@ -544,11 +533,9 @@
     // Init
     cbPerson.addEventListener('change', () => { if (cbPerson.checked) loadSegmentation(); });
 
-    // Permissions UI defaults
     permCam.textContent = 'Kamera: ?'; permCam.className='pill';
     permFS.textContent = 'Dateizugriff: ?'; permFS.className='pill';
 
-    // Safety: check secure context
     if (!window.isSecureContext && location.hostname!=='localhost') {
       alert('Hinweis: Kamera funktioniert nur über HTTPS oder http://localhost');
     }

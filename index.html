@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>TafelCapture v6 – robust & redundant</title>
+<title>TafelCapture v6.1 – robust & redundant</title>
 <style>
   :root{
     color-scheme: dark;
@@ -108,7 +108,7 @@
 /* ===== Basics & Persistenz ===== */
 const $=s=>document.querySelector(s), on=(el,ev,fn,o)=>el.addEventListener(ev,fn,o);
 const clamp=(v,l,h)=>Math.max(l,Math.min(h,v)), fmt=(n,d=2)=>Number(n).toFixed(d);
-const banner=$('#banner'), storeKey='tafelcapture.v6';
+const banner=$('#banner'), storeKey='tafelcapture.v61';
 const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(storeKey)||'{}')}catch{return{}}};
 const saveCfg=c=>localStorage.setItem(storeKey,JSON.stringify(c));
 function showBanner(t,cls='warn',ms=3000){ banner.textContent=t; banner.style.display='block'; banner.style.borderColor=cls==='bad'?'#7a2a2a':cls==='ok'?'#2f6a45':'#263445'; clearTimeout(showBanner._t); showBanner._t=setTimeout(()=>banner.style.display='none',ms); }
@@ -176,7 +176,8 @@ async function loadOpenCV(){
     'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0/opencv.js',
     'https://cdn.jsdelivr.net/gh/opencv/opencv@4.x/build_js/bin/opencv.js'
   ];
-  for (const src of sources){
+  for (let i=0;i<sources.length;i++){
+    const src=sources[i];
     try{
       const base=src.substring(0,src.lastIndexOf('/')+1);
       window.Module={ locateFile:(p)=> base+p };
@@ -189,18 +190,27 @@ async function loadOpenCV(){
 }
 
 /* ===== OpenCV utils (robust) ===== */
-function orderTLTRBRBL(pts){ const bySum=[...pts].sort((a,b)=>(a.x+a.y)-(b.x+b.y)); const byDiff=[...pts].sort((a,b)=>(a.x-a.y)-(b.x-b.y)); const tl=bySum[0], br=bySum.at(-1), tr=byDiff.at(-1), bl=byDiff[0]; return [tl,tr,br,bl]; }
+function orderTLTRBRBL(pts){
+  const bySum=pts.slice().sort((a,b)=>(a.x+a.y)-(b.x+b.y));
+  const byDiff=pts.slice().sort((a,b)=>(a.x-a.y)-(b.x-b.y));
+  const tl=bySum[0], br=bySum[bySum.length-1], tr=byDiff[byDiff.length-1], bl=byDiff[0];
+  return [tl,tr,br,bl];
+}
 function detectBoardQuad(frameCanvas){
   const w=frameCanvas.width, h=frameCanvas.height, sw=Math.max(360,Math.round(w*0.5)), sh=Math.max(200,Math.round(h*0.5));
   const src=cv.imread(frameCanvas);
   const resized=new cv.Mat(); cv.resize(src,resized,new cv.Size(sw,sh),0,0,cv.INTER_AREA);
   const gray=new cv.Mat(); cv.cvtColor(resized,gray,cv.COLOR_RGBA2GRAY);
-  try{ if (cv.createCLAHE){ const clahe=cv.createCLAHE(2.0,new cv.Size(8,8)); clahe.apply(gray,gray); clahe.delete(); } else { cv.equalizeHist(gray,gray); } }catch{}
+  try{
+    if (cv.createCLAHE){ const clahe=cv.createCLAHE(2.0,new cv.Size(8,8)); clahe.apply(gray,gray); clahe.delete(); }
+    else { cv.equalizeHist(gray,gray); }
+  }catch{}
   cv.GaussianBlur(gray,gray,new cv.Size(5,5),0);
 
   let best=null,bestScore=-1;
   const passes=[ {adaptive:false,canny:[60,150],close:3}, {adaptive:true,canny:[40,120],close:5} ];
-  for (const pass of passes){
+  for (let pi=0; pi<passes.length; pi++){
+    const pass=passes[pi];
     let edges=new cv.Mat();
     if (pass.adaptive){ let thr=new cv.Mat(); cv.adaptiveThreshold(gray,thr,255,cv.ADAPTIVE_THRESH_GAUSSIAN_C,cv.THRESH_BINARY,11,2); edges=thr; }
     else { cv.Canny(gray,edges,pass.canny[0],pass.canny[1]); }
@@ -227,12 +237,15 @@ function detectBoardQuad(frameCanvas){
     }
 
     if (!best){
-      // Fallback: größte Box per minAreaRect
-      let maxArea=0, maxCnt=null; for (let i=0;i<contours.size();i++){ const a=cv.contourArea(contours.get(i)); if (a>maxArea){ maxArea=a; maxCnt=contours.get(i);} }
+      // ✅ FIX: Richtiger Zugriff auf RotatedRect-Punkte (Array, kein .get())
+      let maxArea=0, maxCnt=null;
+      for (let i=0;i<contours.size();i++){ const a=cv.contourArea(contours.get(i)); if (a>maxArea){ maxArea=a; maxCnt=contours.get(i);} }
       if (maxCnt && maxArea>(sw*sh*0.15)){
-        const rect=cv.minAreaRect(maxCnt), box=cv.RotatedRect.points(rect);
-        const pts=[box.get(0),box.get(1),box.get(2),box.get(3)].map(p=>({x:p.x*(w/sw),y:p.y*(h/sh)}));
-        best=orderTLTRBRBL(pts); bestScore=maxArea/(sw*sh);
+        const rect=cv.minAreaRect(maxCnt);
+        const box=cv.RotatedRect.points(rect); // ← Array aus 4 Punkten
+        const pts=[ box[0], box[1], box[2], box[3] ].map(p=>({x:p.x*(w/sw), y:p.y*(h/sh)}));
+        best = orderTLTRBRBL(pts);
+        bestScore = maxArea/(sw*sh);
       }
     }
 
@@ -268,7 +281,7 @@ function mse(a,b){ if(!a||!b||a.data.length!==b.data.length) return 1; let s=0; 
 let faceModel=null, tfLoaded=false, blazeLoaded=false, tessLoaded=false;
 async function ensureFace(){
   if (!tfLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); tfLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); tfLoaded=true; }catch(e){ console.warn('tf fail',e); } } }
-  if (!blazeLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch(e){ console.warn('blazeface fail',e); } } }
+  if (!blazeLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch(e){ console.warn('blaze fail',e); } } }
   if (window.blazeface && !faceModel){ try{ faceModel=await blazeface.load(); stModels.textContent+=', BlazeFace'; }catch(e){ console.warn('blazeface.load',e); } }
   return !!faceModel;
 }
@@ -286,13 +299,13 @@ async function faceBlockVerdict(canvas){
 async function ensureOCR(){ if (!tessLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; }catch(e){ console.warn('tesseract fail',e); } } if (tessLoaded) stModels.textContent+=', OCR'; return tessLoaded; }
 async function runOCR(canvas){ try{ const ok=await ensureOCR(); if(!ok) return; const worker=await Tesseract.createWorker('deu'); const {data:{text}}=await worker.recognize(canvas); await worker.terminate(); console.log('OCR:',text); }catch(e){ console.warn('OCR',e); } }
 
-/* ===== Kamera ===== */
+/* ===== Kamera & Auflösung ===== */
 async function listCameras(){
   const devs=await navigator.mediaDevices.enumerateDevices();
   const cams=devs.filter(d=>d.kind==='videoinput');
   const score=l=>{ l=(l||'').toLowerCase(); let s=0; if (l.includes('tele')) s-=30; if (l.includes('aux')) s-=20; if (l.includes('wide')) s-=10; if (l.includes('ultra')) s+=5; if (l.includes('front')) s+=50; if (l.includes('back')||l.includes('rear')||l.includes('environment')) s-=10; return s; };
   cams.sort((a,b)=>score(a.label)-score(b.label));
-  selCam.innerHTML=''; cams.forEach(c=>{ const o=document.createElement('option'); o.value=c.deviceId; o.textContent=c.label||`Kamera ${c.deviceId.slice(0,6)}`; selCam.appendChild(o); });
+  selCam.innerHTML=''; for (let i=0;i<cams.length;i++){ const c=cams[i]; const o=document.createElement('option'); o.value=c.deviceId; o.textContent=c.label||('Kamera '+c.deviceId.slice(0,6)); selCam.appendChild(o); }
   selCam.disabled=cams.length===0;
 }
 async function startCamera(deviceId=null){
@@ -301,7 +314,7 @@ async function startCamera(deviceId=null){
     if (!navigator.mediaDevices?.getUserMedia){ showBanner('getUserMedia nicht verfügbar (HTTPS/Browser prüfen)','bad',7000); btnStart.disabled=false; return; }
     if (mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
 
-    // Dreistufiger Start: Back+Zielauflösung → Back → Any
+    // Dreistufig: Back+Zielauflösung → Back → Any
     let constraints=deviceId?{video:{deviceId:{exact:deviceId}},audio:false}:{video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:60}},audio:false};
     try{ mediaStream=await navigator.mediaDevices.getUserMedia(constraints); }
     catch(e1){ console.warn('gUM 1 fail',e1);
@@ -311,7 +324,7 @@ async function startCamera(deviceId=null){
 
     video.srcObject=mediaStream; await video.play().catch(()=>{});
     track=mediaStream.getVideoTracks()[0]; caps=track.getCapabilities?.()||{}; sets=track.getSettings?.()||{};
-    hardwareZoom='zoom' in (caps||{}); if (hardwareZoom){ hwMin=caps.zoom.min??1; hwMax=caps.zoom.max??1; }
+    hardwareZoom = 'zoom' in (caps||{}); if (hardwareZoom){ hwMin=caps.zoom.min??1; hwMax=caps.zoom.max??1; }
     kpiRes.textContent=`Auflösung: ${sets.width||video.videoWidth||'—'}×${sets.height||video.videoHeight||'—'}`;
 
     await listCameras();
@@ -320,10 +333,10 @@ async function startCamera(deviceId=null){
     await new Promise(r=> video.onloadedmetadata ? (video.onloadedmetadata=()=>r()) : setTimeout(r,150));
     resizeOverlay(); applyDisplayTransform();
 
-    // Pro-Kamera-Optionen (best effort, ignoriert Fehler)
+    // Fokus/Autoexposure/WhiteBalance best effort
     try{ await track.applyConstraints({advanced:[{focusMode:'continuous'},{exposureMode:'continuous'},{whiteBalanceMode:'continuous'}]}); }catch{}
 
-    // Auto max oder Preset
+    // Auto Max oder Preset
     if (selQuality.value==='auto') await setMaxResolution();
     else await applyQualityPreset(selQuality.value);
 
@@ -345,16 +358,44 @@ async function startCamera(deviceId=null){
 }
 async function setMaxResolution(){
   if (!track?.getCapabilities) return false;
-  const c=track.getCapabilities(); const wMax=c.width?.max, hMax=c.height?.max, fpsMax=c.frameRate?.max;
+  const c=track.getCapabilities();
+  const wMax=c.width && c.width.max, hMax=c.height && c.height.max, fpsMax=c.frameRate && c.frameRate.max;
+  const supportsResizeMode = !!(c.resizeMode);
   const candidates=[];
   if (wMax && hMax) candidates.push({w:wMax,h:hMax, exact:true});
-  [{w:3840,h:2160},{w:2560,h:1440},{w:1920,h:1080},{w:1280,h:720}].forEach(p=>candidates.push({...p,exact:true}));
-  for (const cand of candidates){
+  // zusätzliche Kandidaten
+  const pres=[{w:3840,h:2160},{w:2560,h:1440},{w:1920,h:1080},{w:1280,h:720}];
+  for (let i=0;i<pres.length;i++) candidates.push({w:pres[i].w,h:pres[i].h, exact:true});
+
+  // Optional: aspectRatio versuchen, falls exact-Paare scheitern
+  const ar = (wMax&&hMax) ? (wMax/hMax) : (sets && sets.width && sets.height ? sets.width/sets.height : null);
+
+  for (let i=0;i<candidates.length;i++){
+    const cand=candidates[i];
     try{
-      await track.applyConstraints({ width:{[cand.exact?'exact':'ideal']:cand.w}, height:{[cand.exact?'exact':'ideal']:cand.h}, ...(fpsMax?{frameRate:{ideal:Math.min(60,fpsMax)}}:{}), advanced:[{resizeMode:'none'}] });
+      const base = {
+        width: {[cand.exact?'exact':'ideal']: cand.w},
+        height:{[cand.exact?'exact':'ideal']: cand.h}
+      };
+      if (fpsMax) base.frameRate = { ideal: Math.min(60, fpsMax) };
+      const adv = [];
+      if (supportsResizeMode) adv.push({resizeMode:'none'});
+      await track.applyConstraints({ ...base, ...(adv.length?{advanced:adv}:{}) });
       await new Promise(r=>setTimeout(r,120));
-      sets=track.getSettings?.()||sets; kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`; return true;
-    }catch(e){ /* next candidate */ }
+      sets=track.getSettings?.()||sets; kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
+      return true;
+    }catch(e){
+      // nächster Versuch
+    }
+  }
+
+  if (ar){
+    try{
+      await track.applyConstraints({ aspectRatio: { ideal: ar } });
+      await new Promise(r=>setTimeout(r,120));
+      sets=track.getSettings?.()||sets; kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
+      return true;
+    }catch(e){}
   }
   return false;
 }
@@ -363,7 +404,10 @@ async function applyQualityPreset(q){
   const map={ '2160':{w:3840,h:2160}, '1440':{w:2560,h:1440}, '1080':{w:1920,h:1080}, '720':{w:1280,h:720} };
   const p=map[q]; if (!p) return;
   try{
-    await track.applyConstraints({ width:{ideal:p.w}, height:{ideal:p.h}, frameRate:{ideal:30,max:60}, advanced:[{resizeMode:'none'}] });
+    const c=track.getCapabilities?.()||{};
+    const supportsResizeMode=!!(c.resizeMode);
+    const adv = supportsResizeMode ? [{resizeMode:'none'}] : [];
+    await track.applyConstraints({ width:{ideal:p.w}, height:{ideal:p.h}, frameRate:{ideal:30,max:60}, ...(adv.length?{advanced:adv}:{}) });
     await new Promise(r=>setTimeout(r,120));
     sets=track.getSettings?.()||sets; kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
   }catch(e){ console.warn('preset fail',e); }
@@ -389,7 +433,7 @@ async function processingLoop(){
   });
   function drawManualPts(){
     ctxOv.clearRect(0,0,overlay.width,overlay.height);
-    ctxOv.fillStyle='rgba(78,161,255,0.9)'; manualPts.forEach(p=>{ ctxOv.beginPath(); ctxOv.arc(p.x,p.y,6,0,Math.PI*2); ctxOv.fill(); });
+    ctxOv.fillStyle='rgba(78,161,255,0.9)'; for (let i=0;i<manualPts.length;i++){ const p=manualPts[i]; ctxOv.beginPath(); ctxOv.arc(p.x,p.y,6,0,Math.PI*2); ctxOv.fill(); }
     if (manualPts.length>=2){ ctxOv.strokeStyle='rgba(78,161,255,0.7)'; ctxOv.lineWidth=2; ctxOv.beginPath(); ctxOv.moveTo(manualPts[0].x,manualPts[0].y); for(let i=1;i<manualPts.length;i++) ctxOv.lineTo(manualPts[i].x,manualPts[i].y); ctxOv.stroke(); }
   }
 
@@ -482,8 +526,7 @@ on(document,'keydown',(e)=>{ if (e.key.toLowerCase()==='c') captureAndSave('Manu
   saveMode.innerHTML = haveFSAccess ? 'Speichern: <b>Download / Ordner</b>' : 'Speichern: <b>Download</b>';
   zoomInfo.textContent=`Anzeige ${fmt(displayZoom,2)}× | HW —`;
   try{ await listCameras(); }catch{}
-  // OpenCV vorwärmen (nicht blockierend)
-  loadOpenCV();
+  loadOpenCV(); // non-blocking
 })();
 </script>
 </body>

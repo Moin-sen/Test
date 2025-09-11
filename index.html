@@ -39,7 +39,7 @@
   .status{display:grid;grid-template-columns:1fr 1fr;gap:.35rem;font-size:.9rem;color:var(--muted)}
   .status .kv{display:flex;justify-content:space-between;gap:.75rem;background:#11151d;border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem}
 
-  /* Bühne */
+  /* Bühne: füllt den verfügbaren Raum – keine Balken, kein Scroll fürs Livebild */
   .stage{position:relative;overflow:hidden;min-height:50dvh}
   video,canvas{width:100%;height:100%;object-fit:cover;border-radius:10px;touch-action:none}
   #preview{position:absolute;inset:0;z-index:0;background:#000;transform:scale(var(--zoom));transform-origin:center center}
@@ -94,8 +94,8 @@
     <div class="sep"></div>
     <h2 style="margin:0 0 .25rem;color:#9aa3b2">Erkennung</h2>
     <div class="row">
-      <label class="toggle"><input type="checkbox" id="cbPerson" checked> Personen auf der Tafel blockieren</label>
-      <label class="toggle"><input type="checkbox" id="cbSlide" checked> Folien‑Änderung (nur Tafel‑ROI)</label>
+      <label class="toggle"><input type="checkbox" id="cbPerson" checked> Personen blockieren</label>
+      <label class="toggle"><input type="checkbox" id="cbSlide" checked> Folien‑Änderung (nur Tafel)</label>
       <!-- NICHT voraktiviert -->
       <label class="toggle"><input type="checkbox" id="cbAutoCap"> Auto‑Foto bei Folienwechsel</label>
     </div>
@@ -148,30 +148,29 @@
   let dirHandle = null, savedCount = 0;
 
   let cvReady = false, cvLoading = false;
-  let segmenter = null, tfLoading = false;
+  let segmenter = null, segLoading = false;
 
   // boardQuad: [tl,tr,br,bl] in Video-Pixelkoordinaten
   let boardQuadAuto = null;          // von OpenCV
   let boardQuadManual = null;        // vom Nutzer
   let lastThumb = null;              // Uint8Array 64*64 (ROI)
   let lastChangeGateT = 0;
-  let personOnBoard = false;
+  let personPresent = false;
 
   // Perf
   let rafId = 0, fpsFrames = 0, fpsT = performance.now();
 
-  // ---------- UI Helpers ----------
+  // ---------- UI ----------
   function setZoom(z){ stage.style.setProperty('--zoom', z); zoomVal.textContent = z.toFixed(1)+'×'; }
-  zoomRange.addEventListener('input', () => setZoom(parseFloat(zoomRange.value)||1));
-  setZoom(1);
+  zoomRange.addEventListener('input', () => setZoom(parseFloat(zoomRange.value)||1)); setZoom(1);
 
   slideVal.textContent = slideThresh.value + '%';
   slideThresh.addEventListener('input', () => slideVal.textContent = slideThresh.value + '%');
 
   function resizeOverlayToVideo(){
     if (video.videoWidth && video.videoHeight) {
-      overlay.width = video.videoWidth;
-      overlay.height= video.videoHeight;
+      overlay.width  = video.videoWidth;
+      overlay.height = video.videoHeight;
       kvRes.textContent = `${overlay.width}×${overlay.height}`;
     }
   }
@@ -197,10 +196,7 @@
     video.srcObject = stream;
     videoTrack = stream.getVideoTracks()[0];
 
-    // Kameraliste
     await populateCameras();
-
-    // Torch & HW‑Zoom
     detectTorchSupport(); setupHardwareZoom();
 
     const applyMeta = () => { resizeOverlayToVideo(); };
@@ -210,8 +206,8 @@
 
     btnShot.disabled = false; permCam.textContent = 'Kamera: ok'; permCam.className = 'pill ok';
 
-    // Libs laden
-    loadOpenCV(); if (cbPerson.checked) loadSegmentation();
+    // Libraries laden
+    loadOpenCV(); if (cbPerson.checked) loadSeg();
 
     runLoop();
   }
@@ -221,7 +217,7 @@
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     videoTrack = null; btnShot.disabled = true;
     ctx.clearRect(0,0,overlay.width, overlay.height);
-    boardQuadAuto = null; lastThumb = null; personOnBoard = false;
+    boardQuadAuto = null; boardQuadManual = null; lastThumb = null; personPresent = false;
     zoomRange.value = '1'; setZoom(1);
   }
 
@@ -231,7 +227,7 @@
       const cams = devices.filter(d => d.kind === 'videoinput');
       const rank = l => { const L=(l||'').toLowerCase();
         if (L.includes('tele')) return 3; if (L.includes('back')&&(L.includes('aux')||L.includes('camera 2')||L.includes('camera3'))) return 2;
-        if (L.includes('ultra')||L.includes('wide')) return 1; return 0 };
+        if (L.includes('ultra')||L.includes('wide')) return 1; return 0; };
       cams.sort((a,b)=>rank(b.label)-rank(a.label));
       lensSelect.innerHTML=''; cams.forEach(c=>{ const o=document.createElement('option'); o.value=c.deviceId; o.textContent=c.label||`Kamera ${lensSelect.length+1}`; lensSelect.appendChild(o); });
       lensSelect.disabled = cams.length===0;
@@ -288,10 +284,8 @@
   // ---------- Manuelles Board (ohne OpenCV) ----------
   btnMark.addEventListener('click', enterManualMarkMode);
   function enterManualMarkMode(){
-    // Nutzer tippt 4 Ecken im Uhrzeigersinn (TL, TR, BR, BL) – wir sammeln im Video‑Pixelraum
     const pts = [];
     const onClick = (ev)=>{
-      // Koordinaten in Video-Pixel umrechnen (weil object-fit: cover)
       const rect = overlay.getBoundingClientRect();
       const xCss = ev.clientX - rect.left, yCss = ev.clientY - rect.top;
       const [sx, sy] = cssToVideoCoords(xCss, yCss);
@@ -300,7 +294,7 @@
       if (pts.length===4){
         overlay.removeEventListener('click', onClick);
         boardQuadManual = orderQuad(pts.slice());
-        boardQuadAuto = null;             // manuelle setzt auto außer Kraft
+        boardQuadAuto = null;
         drawQuad(boardQuadManual);
         kvBoard.textContent = 'ja (manuell)';
       }
@@ -310,7 +304,7 @@
   }
   function drawTempPts(pts){
     ctx.clearRect(0,0,overlay.width, overlay.height);
-    ctx.fillStyle='rgba(76,201,240,.9)'; ctx.strokeStyle='rgba(76,201,240,.9)'; ctx.lineWidth=2;
+    ctx.fillStyle='rgba(76,201,240,.95)'; ctx.strokeStyle='rgba(76,201,240,.9)'; ctx.lineWidth=2;
     pts.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill(); });
     if (pts.length>1){ ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y); for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke(); }
   }
@@ -322,7 +316,6 @@
 
     const w = overlay.width || video.videoWidth || 1280;
     const h = overlay.height|| video.videoHeight|| 720;
-    // Offscreen-Frame
     const cap = document.createElement('canvas'); cap.width=w; cap.height=h;
     const capCtx = cap.getContext('2d', { willReadFrequently:true });
     drawVideoFullFrame(capCtx, w, h);
@@ -335,7 +328,7 @@
       const blob = await new Promise(res=>out.toBlob(res,'image/jpeg',0.9));
       mat.delete(); roi.delete(); return blob;
     } else {
-      // JS‑Warp (64*64 upscaled) – genügt für Auto‑Shots; für manuell erzeugen wir 1024px breite ROI
+      // JS‑Warp (Nearest) – ausreichend für Auto‑Shots
       const outW = 1024, outH = Math.round(outW*0.6);
       const out = document.createElement('canvas'); out.width=outW; out.height=outH;
       warpQuadCanvasNearest(capCtx, w, h, quad, out.getContext('2d'), outW, outH);
@@ -344,36 +337,50 @@
     }
   }
 
-  // ---------- OpenCV laden ----------
+  // ---------- OpenCV laden (korrekte URL, robust) ----------
   function loadOpenCV(){
     if (cvReady || cvLoading) return; cvLoading = true;
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-1/opencv.js';
+    s.src = 'https://docs.opencv.org/4.x/opencv.js'; // offizieller Build
     s.async = true; s.crossOrigin='anonymous';
-    window.cv = window.cv || {};
-    window.cv.onRuntimeInitialized = () => { cvReady = true; kvModel.textContent = 'OpenCV'; };
-    s.onload = () => { if (window.cv?.Mat && !cvReady){ cvReady=true; kvModel.textContent='OpenCV'; } };
+    s.onload = () => {
+      try {
+        if (window.cv) {
+          window.cv['onRuntimeInitialized'] = () => { cvReady = true; kvModel.textContent = 'OpenCV'; };
+          // Falls schon initialisiert
+          if (window.cv.Mat) { cvReady = true; kvModel.textContent = 'OpenCV'; }
+        }
+      } catch(e){ console.warn('OpenCV init warn', e); }
+    };
     s.onerror = () => { cvLoading = false; kvModel.textContent = 'OpenCV: Ladefehler'; };
     document.head.appendChild(s);
   }
 
-  // ---------- TF.js Personen ----------
-  async function loadSegmentation(){
-    if (segmenter) return segmenter;
-    if (tfLoading) { while(!segmenter) await new Promise(r=>setTimeout(r,120)); return segmenter; }
-    tfLoading = true;
-    try {
-      await import('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js');
-      const mod = await import('https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js');
-      const bs = mod.bodySegmentation;
-      segmenter = await bs.createSegmenter(bs.SupportedModels.MediaPipeSelfieSegmentation, {
-        runtime:'tfjs', modelType:'landscape', enableSegmentationSmoothing:true
-      });
-      kvModel.textContent = (kvModel.textContent ? kvModel.textContent+' + ' : '') + 'SelfieSeg';
-    } catch (e) { console.warn('TF load failed', e); }
-    return segmenter;
+  // ---------- TF.js Personen (per <script>, kein import()) ----------
+  function loadSeg(){
+    if (segmenter || segLoading) return; segLoading = true;
+    const s1 = document.createElement('script');
+    s1.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js';
+    s1.async = true; s1.onload = () => {
+      const s2 = document.createElement('script');
+      s2.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js';
+      s2.async = true; s2.onload = async () => {
+        try {
+          if (window.bodySegmentation) {
+            const bs = window.bodySegmentation;
+            segmenter = await bs.createSegmenter(bs.SupportedModels.MediaPipeSelfieSegmentation, {
+              runtime:'tfjs', modelType:'landscape', enableSegmentationSmoothing:true
+            });
+            kvModel.textContent = (kvModel.textContent ? kvModel.textContent + ' + ' : '') + 'SelfieSeg';
+          }
+        } catch (e) { console.warn('TF createSegmenter failed', e); }
+      };
+      s2.onerror = () => console.warn('Body-Segmentation konnte nicht geladen werden.');
+      document.head.appendChild(s2);
+    };
+    s1.onerror = () => console.warn('TF.js konnte nicht geladen werden.');
+    document.head.appendChild(s1);
   }
-  cbPerson.addEventListener('change', ()=>{ if (cbPerson.checked) loadSegmentation(); });
 
   // ---------- Board‑Tools (OpenCV & JS) ----------
   function orderQuad(pts){ pts.sort((a,b)=>a.y-b.y); const top=pts.slice(0,2).sort((a,b)=>a.x-b.x); const bot=pts.slice(2).sort((a,b)=>a.x-b.x); return [top[0],top[1],bot[1],bot[0]]; }
@@ -407,8 +414,8 @@
     const W=Math.max(320,Math.round(Math.max(wA,wB))), H=Math.max(240,Math.round(Math.max(hA,hB)));
     const src=cv.matFromArray(4,1,cv.CV_32FC2,[tl.x,tl.y,tr.x,tr.y,br.x,br.y,bl.x,bl.y]);
     const dst=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,W,0,W,H,0,H]);
-    const M=cv.getPerspectiveTransform(src,dst); const out=new cv.Mat();
-    cv.warpPerspective(mat,out,M,new cv.Size(W,H));
+    const M=cv.getPerspectiveTransform(src,dst);
+    const out=new cv.Mat(); cv.warpPerspective(mat,out,M,new cv.Size(W,H));
     src.delete(); dst.delete(); M.delete(); return out;
   }
   function drawQuad(q){
@@ -420,11 +427,7 @@
   }
 
   // ---------- JS‑Fallback: ROI‑Thumb & Warp ohne OpenCV ----------
-  function drawVideoFullFrame(targetCtx, w, h){
-    // Da CSS "cover" nutzt, zeichnen wir das gesamte Video in genau die Overlay‑Größe
-    targetCtx.drawImage(video, 0, 0, w, h);
-  }
-  // Map (u,v)∈[0,1]² -> Punkt im Quad (tl,tr,br,bl) – bilinear
+  function drawVideoFullFrame(targetCtx, w, h){ targetCtx.drawImage(video, 0, 0, w, h); }
   function quadMap(quad, u, v){
     const [tl,tr,br,bl]=quad;
     const x = tl.x*(1-u)*(1-v) + tr.x*u*(1-v) + br.x*u*v + bl.x*(1-u)*v;
@@ -449,8 +452,7 @@
   }
   function warpQuadCanvasNearest(ctxSrc, srcW, srcH, quad, ctxDst, outW, outH){
     const srcImg = ctxSrc.getImageData(0,0,srcW,srcH).data;
-    const out = ctxDst.createImageData(outW,outH);
-    const dst = out.data;
+    const out = ctxDst.createImageData(outW,outH); const dst = out.data;
     for(let y=0;y<outH;y++){
       const v = y/(outH-1);
       for(let x=0;x<outW;x++){
@@ -464,18 +466,13 @@
     }
     ctxDst.putImageData(out,0,0);
   }
+  function diffPercent(a,b){ let sum=0; const n=a.length; for (let i=0;i<n;i++) sum += Math.abs(a[i]-b[i]); return (sum/(n*255))*100; }
 
-  function diffPercent(a,b){
-    let sum=0; const n=a.length; for (let i=0;i<n;i++) sum += Math.abs(a[i]-b[i]);
-    return (sum/(n*255))*100;
-  }
-
-  // CSS‑Koordinate -> Video‑Pixel (weil "cover")
+  // CSS‑Koordinate -> Video‑Pixel (weil object-fit:cover)
   function cssToVideoCoords(xCss, yCss){
     const cw = overlay.clientWidth, ch = overlay.clientHeight;
     const vw = overlay.width || video.videoWidth, vh = overlay.height || video.videoHeight;
-    // Bei cover: gleiche Skalierung in beide Richtungen, aber mit Zuschnitt
-    const scale = Math.max(cw/vw, ch/vh);
+    const scale = Math.max(cw/vw, ch/vh); // cover
     const scaledW = vw*scale, scaledH = vh*scale;
     const offsetX = (scaledW - cw)/2, offsetY = (scaledH - ch)/2;
     const vx = (xCss + offsetX) / scale;
@@ -512,25 +509,23 @@
           drawQuad(quad);
           mat.delete();
         } else {
-          // ohne CV nur manuelle Kontur anzeigen
           drawQuad(quad);
           if (!quad) { kvBoard.textContent = '– (keine Board‑ROI)'; }
         }
 
-        // Personen (nur grob, blockiert Auto‑Foto)
-        personOnBoard = false;
-        if (cbPerson.checked && segmenter){
+        // Personen (global) – blockiert Auto‑Foto konservativ
+        personPresent = false;
+        if (cbPerson.checked && window.bodySegmentation && segmenter){
           try {
             const seg = await segmenter.segmentPeople(video, { multiSegmentation:false });
             if (seg && seg.length>0 && seg[0].mask){
-              // einfacher globaler Anteil; reicht für Hände/Kopf deutlich auf der Tafel
               const m=seg[0].mask; let cnt=0; for(let i=3;i<m.data.length;i+=4) if (m.data[i]>128) cnt++;
-              const pct=(cnt/(m.width*m.height))*100; personOnBoard = pct>3.0;
+              const pct=(cnt/(m.width*m.height))*100; personPresent = pct>1.5; // konservativ
             }
           } catch {}
         }
-        document.getElementById('statePerson').textContent='Person: '+(personOnBoard?'ja':'nein');
-        document.getElementById('statePerson').className='pill mono '+(personOnBoard?'warn':'ok');
+        document.getElementById('statePerson').textContent='Person: '+(personPresent?'ja':'nein');
+        document.getElementById('statePerson').className='pill mono '+(personPresent?'warn':'ok');
 
         // Slide‑Änderung NUR auf ROI
         let changed=false;
@@ -560,14 +555,18 @@
           document.getElementById('stateSlide').className = 'pill mono';
         }
 
-        // Auto‑Foto nur wenn explizit an, Board vorhanden, Änderung in ROI, und (optional) keine Person auf Tafel
-        if (cbAutoCap.checked && changed && quad && (!cbPerson.checked || !personOnBoard)){
+        // Auto‑Foto NUR wenn explizit an, Board vorhanden, Änderung in ROI, und (optional) keine Person
+        if (cbAutoCap.checked && changed && (boardQuadManual || boardQuadAuto) && (!cbPerson.checked || !personPresent)){
           const blob = await captureAndRectify(); if (blob) await saveBlob(`tafel_${ts()}.jpg`, blob);
         }
       }
     };
     tick();
   }
+
+  // ---------- Hilfsfunktionen ----------
+  function orderByY(a,b){ return a.y-b.y; }
+  function ts(){ const d=new Date(), p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`; }
 
   // ---------- Init ----------
   btnStart.disabled=false;

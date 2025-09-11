@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>TafelCapture v5 – robust & redundant</title>
+<title>TafelCapture v6 – robust & redundant</title>
 <style>
   :root{
     color-scheme: dark;
@@ -13,32 +13,38 @@
   }
   html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:system-ui,Segoe UI,Roboto,Ubuntu,sans-serif;height:100%;overflow:hidden}
   #app{display:grid;grid-template-rows:auto 1fr auto auto;height:100svh;width:100vw}
-  /* Header / Controls */
+
   header{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.5rem .75rem;background:#0f131a;border-bottom:1px solid var(--bar-border)}
   header .group{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
   button,select,label.chip{background:#16202c;color:var(--fg);border:1px solid #223041;border-radius:.5rem;padding:.45rem .6rem;font-size:.95rem}
   button.primary{background:#1a2b3f;border-color:#2a4060}
-  .kpi{font-variant-numeric:tabular-nums;color:var(--muted)}
-  .kpi b{color:var(--fg)}
+  .kpi{font-variant-numeric:tabular-nums;color:var(--muted)} .kpi b{color:var(--fg)}
   .spacer{flex:1}
-  /* Stage */
+
   #stage{position:relative;background:#000;overflow:hidden}
   video,canvas#overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center}
   canvas#overlay{pointer-events:none}
   #banner{position:absolute;left:50%;top:calc(8px + env(safe-area-inset-top));transform:translateX(-50%);background:rgba(0,0,0,.85);border:1px solid #263445;border-radius:.5rem;padding:.45rem .7rem;font-size:.9rem;z-index:5;display:none}
-  /* Bottom / Status */
+
   #bottomBar{display:flex;gap:.75rem;align-items:center;padding:.6rem .8rem;background:#0f131a;border-top:1px solid var(--bar-border)}
   #zoomSlider{width:100%}
   #status{display:grid;grid-template-columns:repeat(5,auto);gap:.75rem 1.2rem;align-items:center;padding:.35rem .75rem;font-size:.9rem;color:var(--muted)}
   .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
   .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-  /* Landscape: Stage fullscreen, Bars als Overlays (fixed) */
+
+  /* Landscape: Stage fullscreen, Bars als Overlays (fixed) mit Safe Area */
   @media (orientation:landscape){
     #app{grid-template-rows:1fr}
-    header,#bottomBar,#status{position:fixed;left:calc(8px + env(safe-area-inset-left));right:calc(8px + env(safe-area-inset-right));z-index:10;background:var(--bar);backdrop-filter:saturate(1.2) blur(8px);border:1px solid var(--bar-border);border-radius:.6rem}
-    header{top:calc(8px + env(safe-area-inset-top));padding:.4rem .6rem}
-    #bottomBar{bottom:calc(10px + env(safe-area-inset-bottom));padding:.45rem .6rem}
-    #status{bottom:calc(10px + env(safe-area-inset-bottom));transform:translateY(calc(100% + 8px));padding:.3rem .5rem;font-size:.85rem;grid-template-columns:repeat(5,minmax(0,auto))}
+    header,#bottomBar,#status{
+      position:fixed;
+      left:calc(8px + env(safe-area-inset-left));
+      right:calc(8px + env(safe-area-inset-right));
+      z-index:10; background:var(--bar); backdrop-filter:saturate(1.1) blur(8px);
+      border:1px solid var(--bar-border); border-radius:.6rem
+    }
+    header{top:calc(8px + env(safe-area-inset-top)); padding:.4rem .6rem}
+    #bottomBar{bottom:calc(10px + env(safe-area-inset-bottom)); padding:.45rem .6rem}
+    #status{bottom:calc(10px + env(safe-area-inset-bottom)); transform:translateY(calc(100% + 8px)); padding:.3rem .5rem; font-size:.85rem; grid-template-columns:repeat(5,minmax(0,auto))}
     button,select,label.chip{padding:.35rem .5rem;font-size:.9rem}
   }
 </style>
@@ -99,15 +105,16 @@
 </div>
 
 <script>
-/* ========== Helpers & Persistenz ========== */
+/* ===== Basics & Persistenz ===== */
 const $=s=>document.querySelector(s), on=(el,ev,fn,o)=>el.addEventListener(ev,fn,o);
 const clamp=(v,l,h)=>Math.max(l,Math.min(h,v)), fmt=(n,d=2)=>Number(n).toFixed(d);
-const banner=$('#banner');
+const banner=$('#banner'), storeKey='tafelcapture.v6';
+const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(storeKey)||'{}')}catch{return{}}};
+const saveCfg=c=>localStorage.setItem(storeKey,JSON.stringify(c));
 function showBanner(t,cls='warn',ms=3000){ banner.textContent=t; banner.style.display='block'; banner.style.borderColor=cls==='bad'?'#7a2a2a':cls==='ok'?'#2f6a45':'#263445'; clearTimeout(showBanner._t); showBanner._t=setTimeout(()=>banner.style.display='none',ms); }
-const storeKey='tafelcapture.v5'; const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(storeKey)||'{}')}catch{return{}}}; const saveCfg=c=>localStorage.setItem(storeKey,JSON.stringify(c));
 
-/* ========== Elemente ========== */
-const video=$('#video'), overlay=$('#overlay'), ctxOv=overlay.getContext('2d');
+/* ===== Elements ===== */
+const video=$('#video'), overlay=$('#overlay'), ctxOv=overlay.getContext('2d',{willReadFrequently:true});
 const btnStart=$('#btnStart'), selCam=$('#selCam'), selQuality=$('#selQuality'), btnSnap=$('#btnSnap');
 const btnManualBoard=$('#btnManualBoard'), btnResetBoard=$('#btnResetBoard');
 const btnDir=$('#btnDir'), saveMode=$('#saveMode');
@@ -115,50 +122,52 @@ const tglBoardChange=$('#tglBoardChange'), tglAuto=$('#tglAuto'), tglBlocker=$('
 const kpiRes=$('#kpiRes'), kpiFps=$('#kpiFps'), stBoard=$('#stBoard'), stAuto=$('#stAuto'), stBlock=$('#stBlock'), stModels=$('#stModels'), stDiff=$('#stDiff');
 const zoomSlider=$('#zoomSlider'), zoomInfo=$('#zoomInfo');
 
-/* ========== State ========== */
+/* ===== State ===== */
 let mediaStream=null, track=null, caps=null, sets=null;
 let hardwareZoom=false, hwMin=1, hwMax=1, displayZoom=1;
 let dirHandle=null, haveFSAccess=('showDirectoryPicker' in window);
+
 let cvReady=false, cvFailed=false, loadingCV=false;
-let loopRunning=false;
+let loopRunning=false, manualMode=false, manualPts=[];
 let boardQuad=null, boardFound=false, H_warp=null;
 let targetW=1600, targetH=900;
 let prevThumb=null, lastChangeTs=0; const CHANGE_THRESH=0.09, STABLE_MS=800, COOLDOWN_MS=3500;
-let fpsCounter={last:performance.now(), frames:0};
-let manualMode=false, manualPts=[];
+let fpsCounter={last:performance.now(),frames:0};
 
-/* ========== Layout & Zoom (kein Pinch) ========== */
+/* ===== Layout & Zoom ===== */
 function resizeOverlay(){ const r=video.getBoundingClientRect(); overlay.width=Math.max(2,Math.round(r.width)); overlay.height=Math.max(2,Math.round(r.height)); }
 new ResizeObserver(resizeOverlay).observe($('#stage'));
 function applyDisplayTransform(){ const t=`scale(${displayZoom})`; video.style.transform=t; overlay.style.transform=t; }
 on(zoomSlider,'input',()=>applyZoom(parseFloat(zoomSlider.value)));
 async function applyZoom(total){
   let hw=1, disp=total;
-  if (hardwareZoom){ hw = clamp(total, hwMin, hwMax); try{ await track.applyConstraints({advanced:[{zoom:hw}]}); }catch(e){ console.warn('HW zoom fail', e); hw=1; disp=total; } disp = total / hw; }
+  if (hardwareZoom){
+    hw=clamp(total, hwMin, hwMax);
+    try{ await track.applyConstraints({advanced:[{zoom:hw}]}); }catch(e){ console.warn('HW zoom fail',e); hw=1; disp=total; }
+    disp = total / hw;
+  }
   displayZoom = clamp(disp, 1, 10);
   applyDisplayTransform();
   zoomInfo.textContent=`Anzeige ${fmt(displayZoom,2)}× | HW ${hardwareZoom?fmt(hw,2)+'×':'—'}`;
 }
 
-/* ========== FS Access ========== */
+/* ===== FS Access ===== */
 async function chooseDirectory(){
   if (!haveFSAccess){ showBanner('FS Access API nicht unterstützt – nutze Downloads','warn',4000); return; }
-  try{ dirHandle = await window.showDirectoryPicker({mode:'readwrite'}); saveMode.innerHTML='Speichern: <b>Ordner</b>'; }catch(e){ console.warn('dir pick', e); }
+  try{ dirHandle=await window.showDirectoryPicker({mode:'readwrite'}); saveMode.innerHTML='Speichern: <b>Ordner</b>'; }catch(e){ console.warn('dir pick',e); }
 }
 async function saveImage(blob, base='Tafel'){
   const t=new Date(), p=s=>String(s).padStart(2,'0');
   const name=`${base}_${t.getFullYear()}${p(t.getMonth()+1)}${p(t.getDate())}_${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}.png`;
   if (dirHandle && haveFSAccess){
-    try{ const perm=await dirHandle.requestPermission?.({mode:'readwrite'}); if (perm==='granted'){ const fh=await dirHandle.getFileHandle(name,{create:true}); const w=await fh.createWritable(); await w.write(blob); await w.close(); return {mode:'folder', name}; } }catch(e){ console.warn('save folder',e); }
+    try{ const perm=await dirHandle.requestPermission?.({mode:'readwrite'}); if (perm==='granted'){ const fh=await dirHandle.getFileHandle(name,{create:true}); const w=await fh.createWritable(); await w.write(blob); await w.close(); return {mode:'folder',name}; } }catch(e){ console.warn('save folder',e); }
   }
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); URL.revokeObjectURL(a.href); a.remove();
-  return {mode:'download', name};
+  return {mode:'download',name};
 }
 
-/* ========== Script Loader (redundant) ========== */
+/* ===== Script loader & OpenCV redundant ===== */
 function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.async=true; s.onload=()=>res(); s.onerror=e=>rej(e); document.head.appendChild(s); }); }
-
-/* ========== OpenCV (3 Quellen) ========== */
 async function loadOpenCV(){
   if (cvReady||cvFailed||loadingCV) return cvReady;
   loadingCV=true;
@@ -174,20 +183,21 @@ async function loadOpenCV(){
       await loadScript(src);
       await new Promise((res,rej)=>{ const t0=performance.now(); (function wait(){ if (typeof cv!=='undefined'&&cv?.Mat) return res(); if (performance.now()-t0>12000) return rej(new Error('OpenCV timeout')); requestAnimationFrame(wait); })(); });
       cvReady=true; stModels.textContent='OpenCV, Motion'; loadingCV=false; return true;
-    }catch(e){ console.warn('OpenCV fail', src, e); }
+    }catch(e){ console.warn('OpenCV fail',src,e); }
   }
   cvFailed=true; loadingCV=false; stModels.textContent='(ohne OpenCV)'; showBanner('OpenCV nicht geladen – Erkennung aus','warn',5000); return false;
 }
 
-/* ========== OpenCV Utils (robust) ========== */
+/* ===== OpenCV utils (robust) ===== */
 function orderTLTRBRBL(pts){ const bySum=[...pts].sort((a,b)=>(a.x+a.y)-(b.x+b.y)); const byDiff=[...pts].sort((a,b)=>(a.x-a.y)-(b.x-b.y)); const tl=bySum[0], br=bySum.at(-1), tr=byDiff.at(-1), bl=byDiff[0]; return [tl,tr,br,bl]; }
 function detectBoardQuad(frameCanvas){
-  const w=frameCanvas.width,h=frameCanvas.height, sw=Math.max(360,Math.round(w*0.5)), sh=Math.max(200,Math.round(h*0.5));
+  const w=frameCanvas.width, h=frameCanvas.height, sw=Math.max(360,Math.round(w*0.5)), sh=Math.max(200,Math.round(h*0.5));
   const src=cv.imread(frameCanvas);
   const resized=new cv.Mat(); cv.resize(src,resized,new cv.Size(sw,sh),0,0,cv.INTER_AREA);
   const gray=new cv.Mat(); cv.cvtColor(resized,gray,cv.COLOR_RGBA2GRAY);
-  try{ cv.equalizeHist(gray,gray); }catch{}
+  try{ if (cv.createCLAHE){ const clahe=cv.createCLAHE(2.0,new cv.Size(8,8)); clahe.apply(gray,gray); clahe.delete(); } else { cv.equalizeHist(gray,gray); } }catch{}
   cv.GaussianBlur(gray,gray,new cv.Size(5,5),0);
+
   let best=null,bestScore=-1;
   const passes=[ {adaptive:false,canny:[60,150],close:3}, {adaptive:true,canny:[40,120],close:5} ];
   for (const pass of passes){
@@ -197,6 +207,7 @@ function detectBoardQuad(frameCanvas){
     const kernel=cv.Mat.ones(pass.close,pass.close,cv.CV_8U); cv.morphologyEx(edges,edges,cv.MORPH_CLOSE,kernel);
     const contours=new cv.MatVector(), hierarchy=new cv.Mat();
     cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+
     for (let i=0;i<contours.size();i++){
       const cnt=contours.get(i), peri=cv.arcLength(cnt,true);
       const approx=new cv.Mat(); cv.approxPolyDP(cnt,approx,0.02*peri,true);
@@ -207,23 +218,24 @@ function detectBoardQuad(frameCanvas){
         const w1=Math.hypot(ord[1].x-ord[0].x,ord[1].y-ord[0].y), w2=Math.hypot(ord[2].x-ord[3].x,ord[2].y-ord[3].y);
         const h1=Math.hypot(ord[3].x-ord[0].x,ord[3].y-ord[0].y), h2=Math.hypot(ord[2].x-ord[1].x,ord[2].y-ord[1].y);
         const wA=(w1+w2)/2, hA=(h1+h2)/2;
-        const rectScore=1-Math.abs(w1-w2)/Math.max(1,wA)-Math.abs(h1-h2)/Math.max(1,hA);
-        const ar=wA/Math.max(1,hA); const arScore=(ar>0.7&&ar<2.5)?0.5:0;
+        const rectScore=1 - Math.abs(w1-w2)/Math.max(1,wA) - Math.abs(h1-h2)/Math.max(1,hA);
+        const ar=wA/Math.max(1,hA); const arScore=(ar>0.7 && ar<2.5)?0.5:0;
         const score=(area/(sw*sh))+rectScore+arScore;
         if (score>bestScore){ bestScore=score; best=ord.map(p=>({x:p.x*(w/sw),y:p.y*(h/sh)})); }
       }
       approx.delete();
     }
+
     if (!best){
-      // Fallback: größte minAreaRect-Box
+      // Fallback: größte Box per minAreaRect
       let maxArea=0, maxCnt=null; for (let i=0;i<contours.size();i++){ const a=cv.contourArea(contours.get(i)); if (a>maxArea){ maxArea=a; maxCnt=contours.get(i);} }
       if (maxCnt && maxArea>(sw*sh*0.15)){
-        const rect=cv.minAreaRect(maxCnt); const box=cv.RotatedRect.points(rect);
+        const rect=cv.minAreaRect(maxCnt), box=cv.RotatedRect.points(rect);
         const pts=[box.get(0),box.get(1),box.get(2),box.get(3)].map(p=>({x:p.x*(w/sw),y:p.y*(h/sh)}));
-        best = orderTLTRBRBL(pts);
-        bestScore = maxArea/(sw*sh);
+        best=orderTLTRBRBL(pts); bestScore=maxArea/(sw*sh);
       }
     }
+
     edges.delete(); kernel.delete(); contours.delete(); hierarchy.delete();
     if (best) break;
   }
@@ -236,8 +248,8 @@ function computeHomography(q){
   const hL=Math.hypot(bl.x-tl.x,bl.y-tl.y), hR=Math.hypot(br.x-tr.x,br.y-tr.y);
   const wA=(wTop+wBot)/2, hA=(hL+hR)/2, asp=clamp(wA/Math.max(1,hA),0.7,2.5);
   targetW=1600; targetH=Math.round(targetW/asp);
-  const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,[ tl.x,tl.y,tr.x,tr.y,br.x,br.y,bl.x,bl.y ]);
-  const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,[ 0,0,targetW,0,targetW,targetH,0,targetH ]);
+  const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,[tl.x,tl.y,tr.x,tr.y,br.x,br.y,bl.x,bl.y]);
+  const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,targetW,0,targetW,targetH,0,targetH]);
   const H=cv.getPerspectiveTransform(srcTri,dstTri); srcTri.delete(); dstTri.delete(); return H;
 }
 function warpBoard(frameCanvas,H){
@@ -247,16 +259,16 @@ function warpBoard(frameCanvas,H){
   src.delete(); dst.delete(); return out;
 }
 
-/* ========== Frame/Diff ========== */
+/* ===== Frame/Diff ===== */
 function frameCanvas(){ const c=document.createElement('canvas'); c.width=overlay.width; c.height=overlay.height; c.getContext('2d',{willReadFrequently:true}).drawImage(video,0,0,c.width,c.height); return c; }
 function grayThumb(srcCanvas,tw=128,th=72){ const c=document.createElement('canvas'); c.width=tw; c.height=th; const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(srcCanvas,0,0,tw,th); const id=x.getImageData(0,0,tw,th).data; const out=new Float32Array(tw*th); for(let i=0,j=0;i<id.length;i+=4,j++) out[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255; return {data:out,w:tw,h:th}; }
 function mse(a,b){ if(!a||!b||a.data.length!==b.data.length) return 1; let s=0; for(let i=0;i<a.data.length;i++){ const d=a.data[i]-b.data[i]; s+=d*d; } return s/a.data.length; }
 
-/* ========== Face & OCR (optional; redundant CDNs) ========== */
+/* ===== Face & OCR (optional; redundante CDNs) ===== */
 let faceModel=null, tfLoaded=false, blazeLoaded=false, tessLoaded=false;
 async function ensureFace(){
   if (!tfLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); tfLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow/tfjs@4.22.0/dist/tf.min.js'); tfLoaded=true; }catch(e){ console.warn('tf fail',e); } } }
-  if (!blazeLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch(e){ console.warn('blaze fail',e); } } }
+  if (!blazeLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/@tensorflow-models/blazeface@0.1.2/dist/blazeface.min.js'); blazeLoaded=true; }catch(e){ console.warn('blazeface fail',e); } } }
   if (window.blazeface && !faceModel){ try{ faceModel=await blazeface.load(); stModels.textContent+=', BlazeFace'; }catch(e){ console.warn('blazeface.load',e); } }
   return !!faceModel;
 }
@@ -274,7 +286,7 @@ async function faceBlockVerdict(canvas){
 async function ensureOCR(){ if (!tessLoaded){ try{ await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; }catch{ try{ await loadScript('https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js'); tessLoaded=true; }catch(e){ console.warn('tesseract fail',e); } } if (tessLoaded) stModels.textContent+=', OCR'; return tessLoaded; }
 async function runOCR(canvas){ try{ const ok=await ensureOCR(); if(!ok) return; const worker=await Tesseract.createWorker('deu'); const {data:{text}}=await worker.recognize(canvas); await worker.terminate(); console.log('OCR:',text); }catch(e){ console.warn('OCR',e); } }
 
-/* ========== Kamera & Auflösung (Max) ========== */
+/* ===== Kamera ===== */
 async function listCameras(){
   const devs=await navigator.mediaDevices.enumerateDevices();
   const cams=devs.filter(d=>d.kind==='videoinput');
@@ -289,8 +301,8 @@ async function startCamera(deviceId=null){
     if (!navigator.mediaDevices?.getUserMedia){ showBanner('getUserMedia nicht verfügbar (HTTPS/Browser prüfen)','bad',7000); btnStart.disabled=false; return; }
     if (mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
 
-    // 1) Bevorzugt Back-Cam + Zielauflösung
-    let constraints = deviceId? {video:{deviceId:{exact:deviceId}}, audio:false} : { video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30,max:60} }, audio:false };
+    // Dreistufiger Start: Back+Zielauflösung → Back → Any
+    let constraints=deviceId?{video:{deviceId:{exact:deviceId}},audio:false}:{video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:60}},audio:false};
     try{ mediaStream=await navigator.mediaDevices.getUserMedia(constraints); }
     catch(e1){ console.warn('gUM 1 fail',e1);
       try{ mediaStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false}); }
@@ -299,7 +311,7 @@ async function startCamera(deviceId=null){
 
     video.srcObject=mediaStream; await video.play().catch(()=>{});
     track=mediaStream.getVideoTracks()[0]; caps=track.getCapabilities?.()||{}; sets=track.getSettings?.()||{};
-    hardwareZoom = 'zoom' in (caps||{}); if (hardwareZoom){ hwMin=caps.zoom.min??1; hwMax=caps.zoom.max??1; }
+    hardwareZoom='zoom' in (caps||{}); if (hardwareZoom){ hwMin=caps.zoom.min??1; hwMax=caps.zoom.max??1; }
     kpiRes.textContent=`Auflösung: ${sets.width||video.videoWidth||'—'}×${sets.height||video.videoHeight||'—'}`;
 
     await listCameras();
@@ -308,18 +320,20 @@ async function startCamera(deviceId=null){
     await new Promise(r=> video.onloadedmetadata ? (video.onloadedmetadata=()=>r()) : setTimeout(r,150));
     resizeOverlay(); applyDisplayTransform();
 
-    // Auto max oder Preset anwenden
+    // Pro-Kamera-Optionen (best effort, ignoriert Fehler)
+    try{ await track.applyConstraints({advanced:[{focusMode:'continuous'},{exposureMode:'continuous'},{whiteBalanceMode:'continuous'}]}); }catch{}
+
+    // Auto max oder Preset
     if (selQuality.value==='auto') await setMaxResolution();
     else await applyQualityPreset(selQuality.value);
 
-    // Nach max-Set: KPIs updaten
     sets=track.getSettings?.()||sets;
     kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
 
     if (!loopRunning){ loopRunning=true; processingLoop(); }
     showBanner('Kamera läuft','ok',1500);
   }catch(err){
-    console.error('startCamera', err);
+    console.error('startCamera',err);
     let msg=err.name+': '+err.message;
     if (err.name==='NotAllowedError') msg='Kamera-Zugriff verweigert';
     if (err.name==='NotFoundError') msg='Keine Kamera gefunden';
@@ -334,18 +348,13 @@ async function setMaxResolution(){
   const c=track.getCapabilities(); const wMax=c.width?.max, hMax=c.height?.max, fpsMax=c.frameRate?.max;
   const candidates=[];
   if (wMax && hMax) candidates.push({w:wMax,h:hMax, exact:true});
-  // sinnvolle Backups absteigend
   [{w:3840,h:2160},{w:2560,h:1440},{w:1920,h:1080},{w:1280,h:720}].forEach(p=>candidates.push({...p,exact:true}));
   for (const cand of candidates){
     try{
-      const constr={ width:{[cand.exact?'exact':'ideal']:cand.w}, height:{[cand.exact?'exact':'ideal']:cand.h}, ...(fpsMax?{ frameRate:{ideal:Math.min(60,fpsMax)} }:{}) };
-      // resizeMode: none – verhindert Downscale auf manchen Geräten
-      await track.applyConstraints({ ...constr, advanced:[{resizeMode:'none'}] });
+      await track.applyConstraints({ width:{[cand.exact?'exact':'ideal']:cand.w}, height:{[cand.exact?'exact':'ideal']:cand.h}, ...(fpsMax?{frameRate:{ideal:Math.min(60,fpsMax)}}:{}), advanced:[{resizeMode:'none'}] });
       await new Promise(r=>setTimeout(r,120));
-      sets=track.getSettings?.()||sets;
-      kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
-      return true;
-    }catch(e){ /* weiter probieren */ }
+      sets=track.getSettings?.()||sets; kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`; return true;
+    }catch(e){ /* next candidate */ }
   }
   return false;
 }
@@ -356,31 +365,29 @@ async function applyQualityPreset(q){
   try{
     await track.applyConstraints({ width:{ideal:p.w}, height:{ideal:p.h}, frameRate:{ideal:30,max:60}, advanced:[{resizeMode:'none'}] });
     await new Promise(r=>setTimeout(r,120));
-    sets=track.getSettings?.()||sets;
-    kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
-  }catch(e){ console.warn('preset fail', e); }
+    sets=track.getSettings?.()||sets; kpiRes.textContent=`Auflösung: ${sets.width||'—'}×${sets.height||'—'}`;
+  }catch(e){ console.warn('preset fail',e); }
 }
 on(selQuality,'change',async()=>{ if (selQuality.value==='auto') await setMaxResolution(); else await applyQualityPreset(selQuality.value); });
 
 function updateFps(){ fpsCounter.frames++; const now=performance.now(); if (now-fpsCounter.last>=1000){ kpiFps.textContent=`FPS: ${fpsCounter.frames}`; fpsCounter.frames=0; fpsCounter.last=now; }}
 
-/* ========== Loop & Logik ========== */
+/* ===== Loop & Logik ===== */
 async function processingLoop(){
-  const cvOk = await loadOpenCV(); // redundant, aber App läuft auch ohne
+  const cvOk = await loadOpenCV(); // App läuft weiter, wenn false
   let frameIdx=0, lastMotion=null; const MOTION_T=0.18, MOTION_FRAC=0.035;
 
-  // Manuell-Input
   on(overlay,'click',e=>{
     if (!manualMode) return;
     const r=overlay.getBoundingClientRect(); manualPts.push({x:e.clientX-r.left,y:e.clientY-r.top});
-    drawManualPoints();
+    drawManualPts();
     if (manualPts.length===4){
-      boardQuad = orderTLTRBRBL(manualPts); boardFound=true;
+      boardQuad=orderTLTRBRBL(manualPts); boardFound=true;
       if (H_warp) H_warp.delete(); H_warp=computeHomography(boardQuad);
       manualMode=false; manualPts=[]; showBanner('Tafel gesetzt','ok',1500);
     }
   });
-  function drawManualPoints(){
+  function drawManualPts(){
     ctxOv.clearRect(0,0,overlay.width,overlay.height);
     ctxOv.fillStyle='rgba(78,161,255,0.9)'; manualPts.forEach(p=>{ ctxOv.beginPath(); ctxOv.arc(p.x,p.y,6,0,Math.PI*2); ctxOv.fill(); });
     if (manualPts.length>=2){ ctxOv.strokeStyle='rgba(78,161,255,0.7)'; ctxOv.lineWidth=2; ctxOv.beginPath(); ctxOv.moveTo(manualPts[0].x,manualPts[0].y); for(let i=1;i<manualPts.length;i++) ctxOv.lineTo(manualPts[i].x,manualPts[i].y); ctxOv.stroke(); }
@@ -400,7 +407,6 @@ async function processingLoop(){
             if (q){ boardQuad=q; boardFound=true; if (H_warp) H_warp.delete(); H_warp=computeHomography(boardQuad); }
             else { boardFound=false; boardQuad=null; if (H_warp){ H_warp.delete(); H_warp=null; } }
           }
-          // Overlay
           ctxOv.clearRect(0,0,ow,oh);
           if (boardQuad){
             ctxOv.lineWidth=3; ctxOv.strokeStyle='rgba(78,161,255,0.9)'; ctxOv.fillStyle='rgba(78,161,255,0.15)';
@@ -408,7 +414,6 @@ async function processingLoop(){
           }
           stBoard.textContent=boardFound?'ja':'nein'; stBoard.className=boardFound?'ok':'bad';
 
-          // Change & Auto
           if (boardFound && H_warp){
             const warped=warpBoard(frame,H_warp);
             const thumb=grayThumb(warped,128,72);
@@ -431,9 +436,7 @@ async function processingLoop(){
               const faceOk=!(await faceBlockVerdict(frame));
               if (cooldown && blockOk && faceOk){ await captureAndSave('Auto'); processingLoop._lastCap=performance.now(); }
             }
-          } else {
-            ctxOv.clearRect(0,0,ow,oh); stDiff.textContent='—';
-          }
+          } else { ctxOv.clearRect(0,0,ow,oh); stDiff.textContent='—'; }
         }catch(e){
           console.error('processing cv error',e);
           stModels.textContent='(ohne OpenCV)'; cvFailed=true; boardFound=false; boardQuad=null; if (H_warp){ H_warp.delete(); H_warp=null; }
@@ -448,7 +451,7 @@ async function processingLoop(){
   requestAnimationFrame(step);
 }
 
-/* ========== Capture ========== */
+/* ===== Capture ===== */
 async function captureAndSave(prefix='Tafel'){
   try{
     let out=null;
@@ -460,12 +463,11 @@ async function captureAndSave(prefix='Tafel'){
   }catch(e){ console.error('capture',e); showBanner('Fehler beim Speichern','bad',4000); }
 }
 
-/* ========== Events & Init ========== */
+/* ===== Events & Init ===== */
 function persist(){ const c=loadCfg(); saveCfg({...c, tglBoardChange: tglBoardChange.checked, tglAuto: tglAuto.checked, tglBlocker: tglBlocker.checked, tglFace: tglFace.checked, tglOCR: tglOCR.checked}); }
 [tglBoardChange,tglAuto,tglBlocker,tglFace,tglOCR].forEach(el=>on(el,'change',persist));
 on(btnStart,'click',()=>startCamera());
 on(selCam,'change',()=>startCamera(selCam.value));
-on(selQuality,'change',async()=>{ if (selQuality.value==='auto') await setMaxResolution(); else await applyQualityPreset(selQuality.value); });
 on(btnSnap,'click',()=>captureAndSave('Manuell'));
 on(btnDir,'click',chooseDirectory);
 on(tglAuto,'change',()=>{ stAuto.textContent=tglAuto.checked?'an':'aus'; stAuto.className=tglAuto.checked?'ok':'warn'; });
@@ -480,7 +482,7 @@ on(document,'keydown',(e)=>{ if (e.key.toLowerCase()==='c') captureAndSave('Manu
   saveMode.innerHTML = haveFSAccess ? 'Speichern: <b>Download / Ordner</b>' : 'Speichern: <b>Download</b>';
   zoomInfo.textContent=`Anzeige ${fmt(displayZoom,2)}× | HW —`;
   try{ await listCameras(); }catch{}
-  // OpenCV vorwärmen (nicht-blockierend)
+  // OpenCV vorwärmen (nicht blockierend)
   loadOpenCV();
 })();
 </script>

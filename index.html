@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,viewport-fit=cover,user-scalable=no" />
 <meta name="theme-color" content="#0b0e13">
-<title>TafelCapture – PureJS</title>
-<meta name="description" content="Tafel/Whiteboard automatisch erkennen und entzerrt speichern – komplett im Browser (ohne OpenCV).">
+<title>TafelCapture – PureJS Hough</title>
+<meta name="description" content="Tafel/Whiteboard automatisch erkennen und entzerrt speichern – komplett im Browser, robust ohne OpenCV.">
 <style>
   :root{
     color-scheme: dark;
@@ -122,12 +122,30 @@
     <div>Board erkannt: <b id="stBoard" class="bad">nein</b></div>
     <div>Auto: <b id="stAuto" class="warn">aus</b></div>
     <div>Blocker: <b id="stBlock" class="warn">—</b></div>
-    <div>Modelle: <span id="stModels" class="mono">BoardJS, Motion</span></div>
+    <div>Modelle: <span id="stModels" class="mono">BoardJS(Hough), Motion</span></div>
   </div>
 </div>
 
 <script>
-/* ===== Utilities ===== */
+/* ====== Konfiguration (leicht justierbar) ====== */
+const DETECT = {
+  scale1: 0.45,      // große Stufe (Overlay-Anteil)
+  scale2: 0.30,      // kleinere Stufe
+  borderPct: 0.03,   // Randunterdrückung beim Kanten-Scan (3%)
+  cannyK: 0.7,       // High-Threshold = mean + k*std
+  cannyLowRel: 0.5,  // Low = rel*High
+  thetaBins: 180,    // Hough Winkel-Bins
+  minLinesPerGroup: 2,
+  angleTolDeg: 15,   // Orthogonalitäts-Toleranz (± Grad)
+  edgeEpsRel: 0.012, // Distanzschwelle für Edge-Support (relativ zu kleinster Kante)
+  areaMin: 0.07,     // min area fraction
+  areaMax: 0.85,     // max area fraction
+  scoreCut: 0.60,    // minimaler Gesamtscore
+  alignMin: 0.55,    // minimaler Kanten-Align
+  rightMin: 0.50     // minimaler Winkel-Score
+};
+
+/* ===== Short helpers ===== */
 const $=s=>document.querySelector(s), on=(el,ev,fn,o)=>el.addEventListener(ev,fn,o);
 const clamp=(v,l,h)=>Math.max(l,Math.min(h,v)), fmt=(n,d=2)=>Number(n).toFixed(d);
 const banner=$('#banner');
@@ -214,12 +232,15 @@ function frameCanvasSensor(){
   const c=document.createElement('canvas'); c.width=vw; c.height=vh;
   c.getContext('2d',{willReadFrequently:true}).drawImage(video,0,0,c.width,c.height); return c;
 }
-function grayThumb(srcCanvas,tw=128,th=72){
+function grayFromCanvas(srcCanvas, tw, th){
   const c=document.createElement('canvas'); c.width=tw; c.height=th;
   const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(srcCanvas,0,0,tw,th);
-  const id=x.getImageData(0,0,tw,th).data; const out=new Float32Array(tw*th);
-  for(let i=0,j=0;i<id.length;i+=4,j++) out[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255;
-  return {data:out,w:tw,h:th};
+  const id=x.getImageData(0,0,tw,th).data; const g=new Float32Array(tw*th);
+  for(let i=0,j=0;i<id.length;i+=4,j++) g[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255;
+  return {g,w:tw,h:th};
+}
+function grayThumb(srcCanvas,tw=128,th=72){
+  const {g,w,h}=grayFromCanvas(srcCanvas,tw,th); return {data:g,w,hd:th};
 }
 function mse(a,b){ if(!a||!b||a.data.length!==b.data.length) return 1; let s=0; for(let i=0;i<a.data.length;i++){ const d=a.data[i]-b.data[i]; s+=d*d; } return s/a.data.length; }
 
@@ -229,13 +250,13 @@ function norm(x,y){ return Math.hypot(x,y)||1; }
 function angleBetween(ax,ay,bx,by){
   const n1=norm(ax,ay), n2=norm(bx,by);
   const cos=clamp(dot(ax,ay,bx,by)/(n1*n2),-1,1);
-  return Math.acos(cos); // in rad
+  return Math.acos(cos);
 }
+function lerp(a,b,t){ return a+(b-a)*t; }
 
-/* ===== Pure-JS Board Detection (verbessert) ===== */
-/* Sobel Edges */
-function sobelGray(gray,w,h){
-  const gx=new Float32Array(w*h), gy=new Float32Array(w*h), mag=new Float32Array(w*h);
+/* ===== Canny (Sobel + NMS + Hysteresis) ===== */
+function sobel(gray,w,h){
+  const gx=new Float32Array(w*h), gy=new Float32Array(w*h), mag=new Float32Array(w*h), ang=new Float32Array(w*h);
   const idx=(x,y)=>y*w+x;
   for(let y=1;y<h-1;y++){
     for(let x=1;x<w-1;x++){
@@ -245,196 +266,272 @@ function sobelGray(gray,w,h){
       const sx = (-1*a + 1*c) + (-2*d + 2*f) + (-1*g + 1*i);
       const sy = (-1*a -2*b -1*c) + (1*g +2*h1 +1*i);
       const m = Math.hypot(sx, sy);
-      gx[idx(x,y)]=sx; gy[idx(x,y)]=sy; mag[idx(x,y)]=m;
+      gx[idx(x,y)]=sx; gy[idx(x,y)]=sy; mag[idx(x,y)]=m; ang[idx(x,y)]=Math.atan2(sy,sx);
     }
   }
-  return {gx,gy,mag};
+  return {gx,gy,mag,ang};
 }
-/* Edge Threshold (mean + k*std) + Randunterdrückung */
-function thresholdEdgesWithAngles(gx,gy,mag,w,h){
-  let sum=0,sum2=0,n=w*h;
-  for(let i=0;i<n;i++){ const v=mag[i]; sum+=v; sum2+=v*v; }
-  const mean=sum/n, std=Math.sqrt(Math.max(0,sum2/n-mean*mean));
-  const t=mean + 0.9*std; // etwas strenger
-  const mBorder = Math.round(Math.min(w,h)*0.04); // 4% Rand ignorieren
-  const pts=[]; // {x,y,ang}
+function nonMaxSuppression(mag,ang,w,h){
+  const out=new Float32Array(w*h), idx=(x,y)=>y*w+x;
   for(let y=1;y<h-1;y++){
     for(let x=1;x<w-1;x++){
-      if (x<mBorder || y<mBorder || x>=w-mBorder || y>=h-mBorder) continue; // Rand weg
-      const v=mag[y*w+x]; if (v<=t) continue;
-      const sx=gx[y*w+x], sy=gy[y*w+x];
-      const ang=Math.atan2(sy,sx); // -pi..pi
-      pts.push({x,y,ang,mag:v});
+      const a=ang[idx(x,y)], m=mag[idx(x,y)];
+      const deg=((a*180/Math.PI)+180)%180;
+      let dir=0;
+      if (deg<22.5 || deg>=157.5) dir=0;        // horizontal
+      else if (deg<67.5) dir=45;
+      else if (deg<112.5) dir=90;
+      else dir=135;
+      let m1=0,m2=0;
+      if (dir===0){ m1=mag[idx(x-1,y)]; m2=mag[idx(x+1,y)]; }
+      else if (dir===45){ m1=mag[idx(x-1,y-1)]; m2=mag[idx(x+1,y+1)]; }
+      else if (dir===90){ m1=mag[idx(x,y-1)]; m2=mag[idx(x,y+1)]; }
+      else { m1=mag[idx(x-1,y+1)]; m2=mag[idx(x+1,y-1)]; }
+      out[idx(x,y)] = (m>=m1 && m>=m2) ? m : 0;
     }
   }
-  return pts;
+  return out;
 }
-/* Histogramm dominanter Richtungen (0..pi) */
-function dominantAngles(pts,binCount=36){
-  if (pts.length===0) return null;
-  const bins=new Float32Array(binCount);
-  for (const p of pts){
-    let a = Math.abs(p.ang); // 0..pi
-    if (a>Math.PI) a-=Math.PI;
-    if (a>Math.PI) a-=Math.PI;
-    const idx = Math.min(binCount-1, Math.max(0, Math.floor(a/Math.PI*binCount)));
-    bins[idx]+=p.mag;
+function hysteresis(nms,w,h,k=DETECT.cannyK,lowRel=DETECT.cannyLowRel,borderPct=DETECT.borderPct){
+  const n=w*h;
+  let sum=0,sum2=0,count=0;
+  for(let i=0;i<n;i++){ const v=nms[i]; if (v>0){ sum+=v; sum2+=v*v; count++; } }
+  if (!count) return {edgeMap:new Uint8Array(n), edges:[]};
+  const mean=sum/count, std=Math.sqrt(Math.max(0,sum2/count-mean*mean));
+  const high=mean + k*std, low=lowRel*high;
+  const strong=new Uint8Array(n), weak=new Uint8Array(n);
+  for(let i=0;i<n;i++){ const v=nms[i]; if (v>=high) strong[i]=1; else if (v>=low) weak[i]=1; }
+  const edgeMap=new Uint8Array(n);
+  const idx=(x,y)=>y*w+x;
+  const stack=[];
+  const mB = Math.round(Math.min(w,h)*borderPct); // Rand ignorieren
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      if (x<mB||y<mB||x>=w-mB||y>=h-mB) continue; // Rand weg
+      const i=idx(x,y); if (strong[i] && !edgeMap[i]){ edgeMap[i]=1; stack.push(i); }
+      while(stack.length){
+        const s=stack.pop(); const sx=s%w, sy=(s/w)|0;
+        for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+          if(!dx&&!dy) continue;
+          const nx=sx+dx, ny=sy+dy;
+          if (nx<=0||ny<=0||nx>=w-1||ny>=h-1) continue;
+          const ni=idx(nx,ny);
+          if (!edgeMap[ni] && weak[ni]){ edgeMap[ni]=1; stack.push(ni); }
+        }
+      }
+    }
   }
-  let i1=0,m1=-1; for(let i=0;i<binCount;i++){ if (bins[i]>m1){m1=bins[i]; i1=i;} }
-  if (m1<=0) return null;
-  // Zweite Spitze ~90° versetzt (±20°)
-  const target = (i1 + Math.round(binCount/2)) % binCount;
-  const window = Math.round(binCount*20/180);
-  let i2=-1,m2=-1;
-  for(let off=-window; off<=window; off++){
-    let j=target+off; while(j<0) j+=binCount; while(j>=binCount) j-=binCount;
-    if (bins[j]>m2){ m2=bins[j]; i2=j; }
-  }
-  if (i2<0) return null;
-  const a1 = (i1+0.5)*(Math.PI/binCount);
-  const a2 = (i2+0.5)*(Math.PI/binCount);
-  return {a1,a2};
+  const edges=[];
+  for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++) if (edgeMap[idx(x,y)]) edges.push({x,y});
+  return {edgeMap, edges, high, low};
 }
-/* Convex Hull (Monotone Chain) */
-function convexHull(points){
-  if (points.length<3) return [];
-  const pts=points.slice().sort((a,b)=>a.x===b.x? a.y-b.y : a.x-b.x);
-  const cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
-  const lower=[]; for(const p of pts){ while(lower.length>=2 && cross(lower[lower.length-2], lower[lower.length-1], p)<=0) lower.pop(); lower.push(p); }
-  const upper=[]; for(let i=pts.length-1;i>=0;i--){ const p=pts[i]; while(upper.length>=2 && cross(upper[upper.length-2], upper[upper.length-1], p)<=0) upper.pop(); upper.push(p); }
-  upper.pop(); lower.pop();
-  return lower.concat(upper);
-}
-/* Min-Area-Rect entlang gegebener Achsen (u=cos, sin; v=-sin, cos) */
-function orientedRectFromPoints(points, ux,uy, vx,vy){
-  let umin=Infinity, umax=-Infinity, vmin=Infinity, vmax=-Infinity;
-  for (const p of points){
-    const u=p.x*ux + p.y*uy;
-    const v=p.x*vx + p.y*vy;
-    if (u<umin) umin=u; if (u>umax) umax=u;
-    if (v<vmin) vmin=v; if (v>vmax) vmax=v;
-  }
-  const c00={x: ux*umin + vx*vmin, y: uy*umin + vy*vmin};
-  const c10={x: ux*umax + vx*vmin, y: uy*umax + vy*vmin};
-  const c11={x: ux*umax + vx*vmax, y: uy*umax + vy*vmax};
-  const c01={x: ux*umin + vx*vmax, y: uy*umin + vy*vmax};
-  return [c00,c10,c11,c01];
-}
-/* Linien aus Ecken (ax+by+c=0) + Distanz */
-function linesFromQuad(q){
-  const L=[];
-  for(let i=0;i<4;i++){
-    const p=q[i], r=q[(i+1)%4];
-    const a = r.y - p.y;
-    const b = -(r.x - p.x);
-    const c = -(a*p.x + b*p.y);
-    const norm = Math.hypot(a,b)||1;
-    L.push({a:a/norm,b:b/norm,c:c/norm}); // normalisiert
-  }
-  return L;
-}
-function pointLineDistance(px,py,L){ return Math.abs(L.a*px + L.b*py + L.c); }
 
-/* Score eines Rechteck-Kandidaten im Downscale-Space */
-function scoreRectCandidate(q, pts, w, h){
+/* ===== Hough Lines ===== */
+function houghLines(edges,w,h,thetaBins=DETECT.thetaBins){
+  const diag=Math.hypot(w,h);
+  const rhoBins=Math.max(1, Math.ceil(diag*2));
+  const acc=new Uint32Array(thetaBins*rhoBins);
+  const cos=new Float32Array(thetaBins), sin=new Float32Array(thetaBins);
+  for(let t=0;t<thetaBins;t++){ const th=t*Math.PI/thetaBins; cos[t]=Math.cos(th); sin[t]=Math.sin(th); }
+  for(const p of edges){
+    for(let t=0;t<thetaBins;t++){
+      const rho=p.x*cos[t]+p.y*sin[t];
+      const rIndex=Math.round(rho+diag); // shift to [0,2*diag]
+      acc[t*rhoBins + rIndex]++; 
+    }
+  }
+  // Peaks mit lokaler NMS
+  const peaks=[];
+  const winT=3, winR=8;
+  const total=edges.length||1;
+  for(let t=0;t<thetaBins;t++){
+    for(let r=0;r<rhoBins;r++){
+      const v=acc[t*rhoBins+r];
+      if (v < Math.max(15, total*0.02)) continue; // Minimum votes
+      let isMax=true;
+      for(let dt=-winT;dt<=winT && isMax;dt++){
+        for(let dr=-winR;dr<=winR;dr++){
+          if (!dt && !dr) continue;
+          let tt=t+dt; if (tt<0) tt+=thetaBins; if (tt>=thetaBins) tt-=thetaBins;
+          const rr=r+dr; if (rr<0||rr>=rhoBins) continue;
+          if (acc[tt*rhoBins+rr] > v){ isMax=false; break; }
+        }
+      }
+      if (isMax){
+        peaks.push({thetaIndex:t, rhoIndex:r, votes:v, theta:t*Math.PI/thetaBins, rho:r-diag});
+      }
+    }
+  }
+  // Sortiert nach votes
+  peaks.sort((a,b)=>b.votes-a.votes);
+  // Leichtes Zusammenlegen ähnlicher Linien
+  const merged=[];
+  const tolTheta=(Math.PI/thetaBins)*3, tolRho=6;
+  for(const p of peaks){
+    let mergedInto=false;
+    for(const q of merged){
+      if (Math.abs(p.theta-q.theta)<tolTheta && Math.abs(p.rho-q.rho)<tolRho){
+        if (p.votes>q.votes){ q.theta=p.theta; q.rho=p.rho; q.votes=p.votes; q.thetaIndex=p.thetaIndex; q.rhoIndex=p.rhoIndex; }
+        mergedInto=true; break;
+      }
+    }
+    if (!mergedInto) merged.push(p);
+    if (merged.length>24) break;
+  }
+  return merged;
+}
+function linesToGroups(lines){
+  // Suche zwei Winkelgruppen ca. orthogonal
+  const degTol = DETECT.angleTolDeg * Math.PI/180;
+  // nimm Top-N als Kandidaten
+  const cand=lines.slice(0,16);
+  let best=null;
+  for(let i=0;i<cand.length;i++){
+    for(let j=i+1;j<cand.length;j++){
+      let d = Math.abs(cand[i].theta - cand[j].theta);
+      d = Math.min(d, Math.PI - d);
+      if (Math.abs(d - Math.PI/2) <= degTol){
+        // Gruppe A nahe theta_i, Gruppe B nahe theta_j
+        const grpA = lines.filter(l=> Math.min(Math.abs(l.theta-cand[i].theta), Math.PI-Math.abs(l.theta-cand[i].theta)) < degTol);
+        const grpB = lines.filter(l=> Math.min(Math.abs(l.theta-cand[j].theta), Math.PI-Math.abs(l.theta-cand[j].theta)) < degTol);
+        if (grpA.length>=DETECT.minLinesPerGroup && grpB.length>=DETECT.minLinesPerGroup){
+          // wähle pro Gruppe zwei Linien maximaler rho-Distanz
+          const chooseTwo=(arr)=>{
+            let a=null,b=null,maxd=-1;
+            for(let m=0;m<arr.length;m++)for(let n=m+1;n<arr.length;n++){
+              const d=Math.abs(arr[m].rho - arr[n].rho);
+              if (d>maxd){maxd=d; a=arr[m]; b=arr[n];}
+            }
+            return a&&b? [a,b] : arr.slice(0,2);
+          };
+          const twoA=chooseTwo(grpA), twoB=chooseTwo(grpB);
+          if (twoA.length===2 && twoB.length===2){
+            const candScore = cand[i].votes + cand[j].votes + (twoA[0].votes+twoA[1].votes+twoB[0].votes+twoB[1].votes)*0.25;
+            if (!best || candScore > best.score) best={A:twoA,B:twoB,score:candScore};
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+function intersectLines(l1,l2){
+  // x*cosθ + y*sinθ = ρ
+  const a1=Math.cos(l1.theta), b1=Math.sin(l1.theta), c1=l1.rho;
+  const a2=Math.cos(l2.theta), b2=Math.sin(l2.theta), c2=l2.rho;
+  const det=a1*b2 - a2*b1;
+  if (Math.abs(det)<1e-6) return null;
+  const x=(c1*b2 - c2*b1)/det;
+  const y=(a1*c2 - a2*c1)/det;
+  return {x,y};
+}
+function orderTLTRBRBL(pts){
+  const bySum=pts.slice().sort((a,b)=>(a.x+a.y)-(b.x+b.y));
+  const byDiff=pts.slice().sort((a,b)=>(a.x-a.y)-(b.x-b.y));
+  const tl=bySum[0], br=bySum[bySum.length-1], tr=byDiff[byDiff.length-1], bl=byDiff[0];
+  return [tl,tr,br,bl];
+}
+/* Linienstütz: Sampling entlang Kante gegen Binär-Kantenbild */
+function lineSupport(edgeMap,w,h,p0,p1){
+  const N=Math.max(10, Math.round(Math.hypot(p1.x-p0.x,p1.y-p0.y)));
+  let hit=0, tot=0;
+  for(let i=0;i<=N;i++){
+    const t=i/N;
+    const x=p0.x*(1-t)+p1.x*t, y=p0.y*(1-t)+p1.y*t;
+    const xi=Math.round(x), yi=Math.round(y);
+    // kleiner Radius 1 px
+    let ok=false;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      const xx=xi+dx, yy=yi+dy;
+      if (xx>=0&&yy>=0&&xx<w&&yy<h && edgeMap[yy*w+xx]){ ok=true; break; }
+    }
+    if (ok) hit++;
+    tot++;
+  }
+  return hit/Math.max(1,tot);
+}
+
+/* Score eines Rechtecks (im Downscale-Space) */
+function scoreQuad(q, edgeMap, w, h){
   if (!q) return {ok:false, score:0};
-  // Größe/Aspekt
+  // Geometrie
   const wTop=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y), wBot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
   const hL=Math.hypot(q[3].x-q[0].x,q[3].y-q[0].y), hR=Math.hypot(q[2].x-q[1].x,q[2].y-q[1].y);
   const wA=(wTop+wBot)/2, hA=(hL+hR)/2, asp=wA/Math.max(1,hA);
   const areaPoly=Math.abs( (q[0].x*q[1].y - q[1].x*q[0].y) + (q[1].x*q[2].y - q[2].x*q[1].y) + (q[2].x*q[3].y - q[3].x*q[2].y) + (q[3].x*q[0].y - q[0].x*q[3].y) )/2;
   const areaFrac=areaPoly/(w*h);
+  if (areaFrac < DETECT.areaMin || areaFrac > DETECT.areaMax) return {ok:false, score:0};
+  if (asp<0.60 || asp>2.20) return {ok:false, score:0};
 
-  // harte Filter
-  if (asp<0.7 || asp>2.5) return {ok:false, score:0};
-  if (areaFrac<0.08 || areaFrac>0.85) return {ok:false, score:0}; // nicht zu klein/zu groß
-
-  // berührt der Kandidat mehrere Ränder?
-  const mB = 0.015; // 1.5% Toleranz
-  const minX=Math.min(q[0].x,q[1].x,q[2].x,q[3].x), maxX=Math.max(...q.map(p=>p.x));
-  const minY=Math.min(q[0].y,q[1].y,q[2].y,q[3].y), maxY=Math.max(...q.map(p=>p.y));
+  const mB = 0.01; // 1% Touch
+  const minX=Math.min(q[0].x,q[1].x,q[2].x,q[3].x), maxX=Math.max(q[0].x,q[1].x,q[2].x,q[3].x);
+  const minY=Math.min(q[0].y,q[1].y,q[2].y,q[3].y), maxY=Math.max(q[0].y,q[1].y,q[2].y,q[3].y);
   let touch=0;
   if (minX <= w*mB) touch++;
   if (minY <= h*mB) touch++;
   if (maxX >= w*(1-mB)) touch++;
   if (maxY >= h*(1-mB)) touch++;
-  if (touch>=3) return {ok:false, score:0}; // fast Vollbild
+  if (touch>=3) return {ok:false, score:0};
 
   // rechte Winkel
   const a0=angleBetween(q[1].x-q[0].x,q[1].y-q[0].y, q[3].x-q[0].x,q[3].y-q[0].y);
   const a1=angleBetween(q[2].x-q[1].x,q[2].y-q[1].y, q[0].x-q[1].x,q[0].y-q[1].y);
-  const deg=(r)=>Math.abs(r*180/Math.PI-90);
-  const rightness = 1 - clamp((deg(a0)+deg(a1))/60, 0, 1); // 0..1 (0=schlecht,1=gut)
+  const d0=Math.abs(a0*180/Math.PI-90), d1=Math.abs(a1*180/Math.PI-90);
+  const rightness = 1 - clamp((d0+d1)/60, 0, 1);
 
-  // Kanten-Ausrichtungs-Score
-  const L=linesFromQuad(q);
-  const eps = 0.015*Math.min(w,h); // Distanzschwelle relativ zur Größe
-  let close=0;
-  for (const p of pts){
-    const d0=pointLineDistance(p.x,p.y,L[0]);
-    const d1=pointLineDistance(p.x,p.y,L[1]);
-    const d2=pointLineDistance(p.x,p.y,L[2]);
-    const d3=pointLineDistance(p.x,p.y,L[3]);
-    const d=Math.min(d0,d1,d2,d3);
-    if (d<=eps) close++;
-  }
-  const align = pts.length? (close/pts.length) : 0;
+  // Kanten-Support
+  const s01=lineSupport(edgeMap,w,h,q[0],q[1]);
+  const s12=lineSupport(edgeMap,w,h,q[1],q[2]);
+  const s23=lineSupport(edgeMap,w,h,q[2],q[3]);
+  const s30=lineSupport(edgeMap,w,h,q[3],q[0]);
+  const align=(s01+s12+s23+s30)/4;
 
-  // Gesamt-Score: Mischung aus Flächenmitte (bevorzugt mittelgroß), rightness, alignment
-  const areaCenter = 1 - Math.abs(areaFrac - 0.30)/0.30; // Peak bei 30%
-  const score = clamp( 0.25*areaCenter + 0.35*rightness + 0.40*align , 0, 1);
-  const ok = (align>=0.55) && (rightness>=0.5); // Mindesthürden
+  const areaCenter = 1 - Math.abs(areaFrac - 0.30)/0.30;
+  const score = clamp( 0.20*areaCenter + 0.40*align + 0.40*rightness , 0, 1);
+  const ok = (align>=DETECT.alignMin) && (rightness>=DETECT.rightMin) && (score>=DETECT.scoreCut);
   return {ok, score, meta:{areaFrac,align,rightness,asp}};
 }
 
-/* Hauptfunktion: Liefert QUAD in Overlay-Koordinaten oder null */
+/* Haupt-Erkennung (Mehrskalig, Hough-Quadrilateral) */
 function detectBoardQuadOverlayJS(frameCanvas){
-  const w=frameCanvas.width, h=frameCanvas.height;
-  const tw=Math.max(200, Math.round(w*0.40)), th=Math.max(112, Math.round(h*0.40)); // moderates Downscale
-  // downscale + gray
-  const tmp=document.createElement('canvas'); tmp.width=tw; tmp.height=th;
-  const tx=tmp.getContext('2d',{willReadFrequently:true});
-  tx.drawImage(frameCanvas,0,0,tw,th);
-  const id=tx.getImageData(0,0,tw,th).data; const gray=new Float32Array(tw*th);
-  for(let i=0,j=0;i<id.length;i+=4,j++) gray[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255;
+  const scales=[DETECT.scale1, DETECT.scale2];
+  let best=null, bestScore=-1, bestScale={sx:1,sy:1};
 
-  const {gx,gy,mag}=sobelGray(gray,tw,th);
-  const epts=thresholdEdgesWithAngles(gx,gy,mag,tw,th);
-  if (epts.length < (tw*th*0.008)) return null; // sehr wenige Kanten -> kein Board
+  for (const sc of scales){
+    const w=Math.max(160, Math.round(frameCanvas.width*sc));
+    const h=Math.max(90, Math.round(frameCanvas.height*sc));
+    const {g, w:tw, h:th} = grayFromCanvas(frameCanvas, w, h);
+    const {mag,ang} = sobel(g,tw,th);
+    const nms = nonMaxSuppression(mag,ang,tw,th);
+    const {edgeMap, edges} = hysteresis(nms,tw,th,DETECT.cannyK,DETECT.cannyLowRel,DETECT.borderPct);
+    if (edges.length < (tw*th*0.004)) continue;
 
-  // Kandidat A: Orientierungs-Box aus dominanten Winkeln
-  let best=null, bestScore=-1;
-  const dom=dominantAngles(epts);
-  if (dom){
-    const ux=Math.cos(dom.a1), uy=Math.sin(dom.a1);
-    const vx=-Math.sin(dom.a1), vy=Math.cos(dom.a1); // senkrecht
-    const rectA = orientedRectFromPoints(epts, ux,uy, vx,vy);
-    const sA = scoreRectCandidate(rectA, epts, tw, th);
-    if (sA.ok && sA.score>bestScore){ best=rectA; bestScore=sA.score; }
-  }
+    const lines = houghLines(edges, tw, th, DETECT.thetaBins);
+    if (lines.length < 4) continue;
+    const groups = linesToGroups(lines);
+    if (!groups) continue;
 
-  // Kandidat B: Hull -> MinArea entlang Hull-Kante (Rotation-Search lite)
-  const basePts = epts.map(p=>({x:p.x,y:p.y})); // ohne Winkel
-  const hull=convexHull(basePts);
-  if (hull.length>=3){
-    // teste mehrere Kanten der Hull, picke beste
-    for (let i=0;i<hull.length;i+=Math.max(1, Math.floor(hull.length/6))){
-      const p0=hull[i], p1=hull[(i+1)%hull.length];
-      const dx=p1.x-p0.x, dy=p1.y-p0.y; const len=Math.hypot(dx,dy)||1;
-      const ux=dx/len, uy=dy/len, vx=-uy, vy=ux;
-      const rectB = orientedRectFromPoints(basePts, ux,uy, vx,vy);
-      const sB = scoreRectCandidate(rectB, epts, tw, th);
-      if (sB.ok && sB.score>bestScore){ best=rectB; bestScore=sB.score; }
+    // 4 Linien: A0,A1 und B0,B1
+    const L = [groups.A[0], groups.A[1], groups.B[0], groups.B[1]];
+    // Ecken: Schnitte (A0∩B0, A1∩B0, A1∩B1, A0∩B1) -> dann ordnen
+    const p0=intersectLines(L[0],L[2]), p1=intersectLines(L[1],L[2]);
+    const p2=intersectLines(L[1],L[3]), p3=intersectLines(L[0],L[3]);
+    if (!p0||!p1||!p2||!p3) continue;
+    const quadRaw=[p0,p1,p2,p3];
+    // clip ins Bild
+    const inside=quadRaw.every(p=>p.x>-5 && p.y>-5 && p.x<tw+5 && p.y<th+5);
+    if (!inside) continue;
+
+    const quad=orderTLTRBRBL(quadRaw);
+    const {ok,score}=scoreQuad(quad, edgeMap, tw, th);
+    if (ok && score>bestScore){
+      bestScore=score; best=quad; bestScale={sx:frameCanvas.width/tw, sy:frameCanvas.height/th};
     }
   }
 
-  if (!best || bestScore<0.55) return null; // strenger Cutoff
-
+  if (!best) return null;
   // Hochskalieren in Overlay-Koordinaten
-  const sx=w/tw, sy=h/th;
-  const rectScaled=best.map(p=>({x:p.x*sx, y:p.y*sy}));
-
-  return orderTLTRBRBL(rectScaled);
+  return best.map(p=>({x:p.x*bestScale.sx, y:p.y*bestScale.sy}));
 }
 
 /* ===== Overlay <-> Video mapping (object-fit: cover) ===== */
@@ -450,13 +547,7 @@ function overlayToVideoPoint(pt){
 }
 function mapQuadOverlayToVideo(q){ return q.map(p=>overlayToVideoPoint(p)); }
 
-/* ===== Homography (DLT) & helpers ===== */
-function orderTLTRBRBL(pts){
-  const bySum=pts.slice().sort((a,b)=>(a.x+a.y)-(b.x+b.y));
-  const byDiff=pts.slice().sort((a,b)=>(a.x-a.y)-(b.x-b.y));
-  const tl=bySum[0], br=bySum[bySum.length-1], tr=byDiff[byDiff.length-1], bl=byDiff[0];
-  return [tl,tr,br,bl];
-}
+/* ===== Homographie + Invers ===== */
 function computeHomography(srcPts, dstPts){
   const A=new Array(8).fill(0).map(()=>new Float64Array(8));
   const b=new Float64Array(8);
@@ -532,7 +623,6 @@ function warpBoardWebGL(srcCanvas, srcQuad, outW, outH){
   const vsh=compile(gl.VERTEX_SHADER,vs), fsh=compile(gl.FRAGMENT_SHADER,fs);
   if(!vsh||!fsh) return null;
   gl.attachShader(prog,vsh); gl.attachShader(prog,fsh); gl.linkProgram(prog);
-  if(!gl.getProgramParameter(prog,gl.link_STATUS)){/*noop*/}
   gl.useProgram(prog);
 
   const pos=new Float32Array([ -1,-1,  1,-1,  -1,1,  1,1 ]);
@@ -708,7 +798,6 @@ function drawOverlayQuad(q){
   ctxOv.lineWidth=3.5; ctxOv.strokeStyle='rgba(78,161,255,1.0)'; ctxOv.fillStyle='rgba(78,161,255,0.15)';
   ctxOv.beginPath(); ctxOv.moveTo(q[0].x,q[0].y); for(let i=1;i<4;i++) ctxOv.lineTo(q[i].x,q[i].y); ctxOv.closePath(); ctxOv.stroke(); ctxOv.fill();
 }
-function lerp(a,b,t){ return a+(b-a)*t; }
 function smoothQuad(prev,cur,alpha=0.35){
   if (!prev) return cur;
   return cur.map((p,i)=>({x:lerp(prev[i].x,p.x,alpha), y:lerp(prev[i].y,p.y,alpha)}));
@@ -723,10 +812,10 @@ async function processingLoop(){
     if (ow>2 && oh>2){
       const frameOverlay=frameCanvasOverlay();
       try{
-        if (!boardFound || (frameIdx%6===0)){ // etwas häufiger prüfen
+        if (!boardFound || (frameIdx%5===0)){ // etwas häufiger prüfen
           const q=detectBoardQuadOverlayJS(frameOverlay);
           if (q){
-            // Seitenverhältnis/Zielgröße aktualisieren
+            // Zielgröße
             const wTop=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y);
             const wBot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
             const hL=Math.hypot(q[3].x-q[0].x,q[3].y-q[0].y);
@@ -741,21 +830,18 @@ async function processingLoop(){
           }
         }
 
-        // Glättung und Zeichnen
         smoothed = boardFound ? smoothQuad(smoothed, boardQuadOverlay, 0.35) : null;
         drawOverlayQuad(smoothed);
         stBoard.textContent=boardFound?'ja':'nein'; stBoard.className=boardFound?'ok':'bad';
 
-        // Change/Auto (nur wenn Board sichtbar)
         if (boardFound){
           const warpedForDiff = frameOverlay;
-          const thumb=grayThumb(warpedForDiff,128,72);
-          const diffVal=prevThumb?mse(thumb,prevThumb):null; prevThumb=thumb;
-
-          if (!lastMotion) lastMotion=grayThumb(warpedForDiff,128,72);
-          const cur=grayThumb(warpedForDiff,128,72);
-          let ch=0; for(let i=0;i<cur.data.length;i++) if (Math.abs(cur.data[i]-lastMotion.data[i])>MOTION_T) ch++;
-          const frac=ch/cur.data.length, motionBlock=frac>MOTION_FRAC; lastMotion=cur;
+          const thumb=grayFromCanvas(warpedForDiff,128,72);
+          const diffVal=prevThumb?mse({data:thumb.g},prevThumb):null; prevThumb={data:thumb.g};
+          if (!lastMotion){ const t=grayFromCanvas(warpedForDiff,128,72); lastMotion={data:t.g}; }
+          const cur=grayFromCanvas(warpedForDiff,128,72);
+          let ch=0; for(let i=0;i<cur.g.length;i++) if (Math.abs(cur.g[i]-lastMotion.data[i])>MOTION_T) ch++;
+          const frac=ch/cur.g.length, motionBlock=frac>MOTION_FRAC; lastMotion={data:cur.g};
 
           stBlock.textContent=tglBlocker.checked?(motionBlock?'blockiert':'frei'):'aus';
           stBlock.className=tglBlocker.checked?(motionBlock?'bad':'ok'):'warn';

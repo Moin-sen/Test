@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,viewport-fit=cover,user-scalable=no" />
 <meta name="theme-color" content="#0b0e13">
-<title>TafelCapture – PureJS Hough</title>
-<meta name="description" content="Tafel/Whiteboard automatisch erkennen und entzerrt speichern – komplett im Browser, robust ohne OpenCV.">
+<title>TafelCapture – PureJS Hough (Stabil)</title>
+<meta name="description" content="Tafel/Whiteboard automatisch erkennen, stabil tracken und entzerrt speichern – komplett im Browser, ohne OpenCV.">
 <style>
   :root{
     color-scheme: dark;
@@ -122,27 +122,34 @@
     <div>Board erkannt: <b id="stBoard" class="bad">nein</b></div>
     <div>Auto: <b id="stAuto" class="warn">aus</b></div>
     <div>Blocker: <b id="stBlock" class="warn">—</b></div>
-    <div>Modelle: <span id="stModels" class="mono">BoardJS(Hough), Motion</span></div>
+    <div>Modelle: <span id="stModels" class="mono">BoardJS(Hough+Lock), Motion</span></div>
   </div>
 </div>
 
 <script>
-/* ====== Konfiguration (leicht justierbar) ====== */
+/* ====== Konfiguration (robuste Defaults) ====== */
 const DETECT = {
-  scale1: 0.45,      // große Stufe (Overlay-Anteil)
-  scale2: 0.30,      // kleinere Stufe
-  borderPct: 0.03,   // Randunterdrückung beim Kanten-Scan (3%)
-  cannyK: 0.7,       // High-Threshold = mean + k*std
+  scale1: 0.48,      // große Stufe
+  scale2: 0.32,      // kleinere Stufe
+  borderPct: 0.03,   // Randunterdrückung (3%)
+  cannyK: 0.75,      // High-Threshold = mean + k*std
   cannyLowRel: 0.5,  // Low = rel*High
   thetaBins: 180,    // Hough Winkel-Bins
   minLinesPerGroup: 2,
-  angleTolDeg: 15,   // Orthogonalitäts-Toleranz (± Grad)
-  edgeEpsRel: 0.012, // Distanzschwelle für Edge-Support (relativ zu kleinster Kante)
-  areaMin: 0.07,     // min area fraction
-  areaMax: 0.85,     // max area fraction
-  scoreCut: 0.60,    // minimaler Gesamtscore
-  alignMin: 0.55,    // minimaler Kanten-Align
-  rightMin: 0.50     // minimaler Winkel-Score
+  angleTolDeg: 15,   // Orthogonalitäts-Toleranz
+  areaMin: 0.06,     // min Flächenanteil
+  areaMax: 0.80,     // max Flächenanteil (unterbindet Vollbild)
+  scoreCut: 0.58,    // minimaler Score für Kandidat
+  alignMin: 0.50,    // Minimal-Support entlang Kanten
+  rightMin: 0.48,    // Minimaler Winkel-Score
+  // Tracking/Lock:
+  acquireHigh: 0.66, // Score zum Einlocken
+  acquireFrames: 2,  // so viele gute Frames in Folge fürs Lock
+  keepLow: 0.48,     // solange Score >= keepLow bleibt, halten
+  maxMiss: 12,       // sonst erst nach N Misses lock verlieren
+  // Edge-Snapping:
+  snapRel: 0.05,     // Suchradius entlang Normalen (in % der kurzen Kante)
+  snapSteps: 9       // diskrete Offsets je Richtung
 };
 
 /* ===== Short helpers ===== */
@@ -169,9 +176,19 @@ const zoomSlider=$('#zoomSlider'), zoomInfo=$('#zoomInfo');
 let mediaStream=null, track=null, caps=null, sets=null;
 let hardwareZoom=false, hwMin=1, hwMax=1, displayZoom=1;
 let dirHandle=null, haveFSAccess=('showDirectoryPicker' in window);
-let loopRunning=false, boardQuadOverlay=null, boardQuadVideo=null, boardFound=false;
+let loopRunning=false;
 let targetW=1600, targetH=900;
 let prevThumb=null, lastChangeTs=0; const CHANGE_THRESH=0.09, STABLE_MS=800, COOLDOWN_MS=3500;
+
+/* Tracking/Lock State */
+const lockState = {
+  locked: false,
+  hit: 0, miss: 0,
+  quad: null,         // im Overlay-Space (aktueller „harte“ Zustand)
+  smooth: null,       // für Overlay-Zeichnung (EMWA)
+  score: 0,
+  angles: null        // [thetaA, thetaB] aus letztem Quad
+};
 
 /* ===== Layout & Zoom ===== */
 function resizeOverlay(){
@@ -234,15 +251,14 @@ function frameCanvasSensor(){
 }
 function grayFromCanvas(srcCanvas, tw, th){
   const c=document.createElement('canvas'); c.width=tw; c.height=th;
-  const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(srcCanvas,0,0,tw,th);
+  const x=c.getContext('2d',{willReadFrequently:true});
+  // leichte Box-Blur zur Rauschreduktion
+  x.filter='blur(0.3px)'; x.drawImage(srcCanvas,0,0,tw,th); x.filter='none';
   const id=x.getImageData(0,0,tw,th).data; const g=new Float32Array(tw*th);
   for(let i=0,j=0;i<id.length;i+=4,j++) g[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255;
   return {g,w:tw,h:th};
 }
-function grayThumb(srcCanvas,tw=128,th=72){
-  const {g,w,h}=grayFromCanvas(srcCanvas,tw,th); return {data:g,w,hd:th};
-}
-function mse(a,b){ if(!a||!b||a.data.length!==b.data.length) return 1; let s=0; for(let i=0;i<a.data.length;i++){ const d=a.data[i]-b.data[i]; s+=d*d; } return s/a.data.length; }
+function mse(a,b){ if(!a||!b||a.length!==b.length) return 1; let s=0; for(let i=0;i<a.length;i++){ const d=a[i]-b[i]; s+=d*d; } return s/a.length; }
 
 /* ===== Math helpers ===== */
 function dot(ax,ay,bx,by){ return ax*bx+ay*by; }
@@ -278,7 +294,7 @@ function nonMaxSuppression(mag,ang,w,h){
       const a=ang[idx(x,y)], m=mag[idx(x,y)];
       const deg=((a*180/Math.PI)+180)%180;
       let dir=0;
-      if (deg<22.5 || deg>=157.5) dir=0;        // horizontal
+      if (deg<22.5 || deg>=157.5) dir=0;
       else if (deg<67.5) dir=45;
       else if (deg<112.5) dir=90;
       else dir=135;
@@ -307,7 +323,7 @@ function hysteresis(nms,w,h,k=DETECT.cannyK,lowRel=DETECT.cannyLowRel,borderPct=
   const mB = Math.round(Math.min(w,h)*borderPct); // Rand ignorieren
   for(let y=1;y<h-1;y++){
     for(let x=1;x<w-1;x++){
-      if (x<mB||y<mB||x>=w-mB||y>=h-mB) continue; // Rand weg
+      if (x<mB||y<mB||x>=w-mB||y>=h-mB) continue;
       const i=idx(x,y); if (strong[i] && !edgeMap[i]){ edgeMap[i]=1; stack.push(i); }
       while(stack.length){
         const s=stack.pop(); const sx=s%w, sy=(s/w)|0;
@@ -326,28 +342,38 @@ function hysteresis(nms,w,h,k=DETECT.cannyK,lowRel=DETECT.cannyLowRel,borderPct=
   return {edgeMap, edges, high, low};
 }
 
-/* ===== Hough Lines ===== */
-function houghLines(edges,w,h,thetaBins=DETECT.thetaBins){
+/* ===== Hough + Gruppierung ===== */
+function houghLines(edges,w,h,thetaBins=DETECT.thetaBins, thetaGate=null){
   const diag=Math.hypot(w,h);
   const rhoBins=Math.max(1, Math.ceil(diag*2));
   const acc=new Uint32Array(thetaBins*rhoBins);
   const cos=new Float32Array(thetaBins), sin=new Float32Array(thetaBins);
   for(let t=0;t<thetaBins;t++){ const th=t*Math.PI/thetaBins; cos[t]=Math.cos(th); sin[t]=Math.sin(th); }
+  const allowTheta = (t)=>{
+    if (!thetaGate) return true;
+    // gate: array of {center, width}
+    for(const g of thetaGate){
+      let d=Math.abs(t-g.center); d=Math.min(d, Math.PI - d);
+      if (d<=g.width) return true;
+    }
+    return false;
+  };
   for(const p of edges){
     for(let t=0;t<thetaBins;t++){
+      const th=t*Math.PI/thetaBins;
+      if (!allowTheta(th)) continue;
       const rho=p.x*cos[t]+p.y*sin[t];
-      const rIndex=Math.round(rho+diag); // shift to [0,2*diag]
-      acc[t*rhoBins + rIndex]++; 
+      const rIndex=Math.round(rho+diag);
+      acc[t*rhoBins + rIndex]++;
     }
   }
-  // Peaks mit lokaler NMS
   const peaks=[];
   const winT=3, winR=8;
   const total=edges.length||1;
   for(let t=0;t<thetaBins;t++){
     for(let r=0;r<rhoBins;r++){
       const v=acc[t*rhoBins+r];
-      if (v < Math.max(15, total*0.02)) continue; // Minimum votes
+      if (v < Math.max(15, total*0.02)) continue;
       let isMax=true;
       for(let dt=-winT;dt<=winT && isMax;dt++){
         for(let dr=-winR;dr<=winR;dr++){
@@ -362,16 +388,15 @@ function houghLines(edges,w,h,thetaBins=DETECT.thetaBins){
       }
     }
   }
-  // Sortiert nach votes
   peaks.sort((a,b)=>b.votes-a.votes);
-  // Leichtes Zusammenlegen ähnlicher Linien
+  // Merge nahe Peaks
   const merged=[];
   const tolTheta=(Math.PI/thetaBins)*3, tolRho=6;
   for(const p of peaks){
     let mergedInto=false;
     for(const q of merged){
       if (Math.abs(p.theta-q.theta)<tolTheta && Math.abs(p.rho-q.rho)<tolRho){
-        if (p.votes>q.votes){ q.theta=p.theta; q.rho=p.rho; q.votes=p.votes; q.thetaIndex=p.thetaIndex; q.rhoIndex=p.rhoIndex; }
+        if (p.votes>q.votes){ Object.assign(q,p); }
         mergedInto=true; break;
       }
     }
@@ -381,9 +406,7 @@ function houghLines(edges,w,h,thetaBins=DETECT.thetaBins){
   return merged;
 }
 function linesToGroups(lines){
-  // Suche zwei Winkelgruppen ca. orthogonal
   const degTol = DETECT.angleTolDeg * Math.PI/180;
-  // nimm Top-N als Kandidaten
   const cand=lines.slice(0,16);
   let best=null;
   for(let i=0;i<cand.length;i++){
@@ -391,11 +414,10 @@ function linesToGroups(lines){
       let d = Math.abs(cand[i].theta - cand[j].theta);
       d = Math.min(d, Math.PI - d);
       if (Math.abs(d - Math.PI/2) <= degTol){
-        // Gruppe A nahe theta_i, Gruppe B nahe theta_j
-        const grpA = lines.filter(l=> Math.min(Math.abs(l.theta-cand[i].theta), Math.PI-Math.abs(l.theta-cand[i].theta)) < degTol);
-        const grpB = lines.filter(l=> Math.min(Math.abs(l.theta-cand[j].theta), Math.PI-Math.abs(l.theta-cand[j].theta)) < degTol);
+        const near=(base)=>(l)=>Math.min(Math.abs(l.theta-base), Math.PI-Math.abs(l.theta-base)) < degTol;
+        const grpA = lines.filter(near(cand[i].theta));
+        const grpB = lines.filter(near(cand[j].theta));
         if (grpA.length>=DETECT.minLinesPerGroup && grpB.length>=DETECT.minLinesPerGroup){
-          // wähle pro Gruppe zwei Linien maximaler rho-Distanz
           const chooseTwo=(arr)=>{
             let a=null,b=null,maxd=-1;
             for(let m=0;m<arr.length;m++)for(let n=m+1;n<arr.length;n++){
@@ -407,7 +429,7 @@ function linesToGroups(lines){
           const twoA=chooseTwo(grpA), twoB=chooseTwo(grpB);
           if (twoA.length===2 && twoB.length===2){
             const candScore = cand[i].votes + cand[j].votes + (twoA[0].votes+twoA[1].votes+twoB[0].votes+twoB[1].votes)*0.25;
-            if (!best || candScore > best.score) best={A:twoA,B:twoB,score:candScore};
+            if (!best || candScore > best.score) best={A:twoA,B:twoB,score:candScore, thetaA:cand[i].theta, thetaB:cand[j].theta};
           }
         }
       }
@@ -416,7 +438,6 @@ function linesToGroups(lines){
   return best;
 }
 function intersectLines(l1,l2){
-  // x*cosθ + y*sinθ = ρ
   const a1=Math.cos(l1.theta), b1=Math.sin(l1.theta), c1=l1.rho;
   const a2=Math.cos(l2.theta), b2=Math.sin(l2.theta), c2=l2.rho;
   const det=a1*b2 - a2*b1;
@@ -431,7 +452,14 @@ function orderTLTRBRBL(pts){
   const tl=bySum[0], br=bySum[bySum.length-1], tr=byDiff[byDiff.length-1], bl=byDiff[0];
   return [tl,tr,br,bl];
 }
-/* Linienstütz: Sampling entlang Kante gegen Binär-Kantenbild */
+function quadAngles(q){
+  const t1=Math.atan2(q[1].y-q[0].y, q[1].x-q[0].x);
+  const t2=Math.atan2(q[3].y-q[0].y, q[3].x-q[0].x);
+  const nrm=(a)=>{ let x=a%(Math.PI); if (x<0) x+=Math.PI; return x; };
+  return [nrm(t1), nrm(t2)];
+}
+
+/* Linien-Support auf Binär-Kanten */
 function lineSupport(edgeMap,w,h,p0,p1){
   const N=Math.max(10, Math.round(Math.hypot(p1.x-p0.x,p1.y-p0.y)));
   let hit=0, tot=0;
@@ -439,7 +467,6 @@ function lineSupport(edgeMap,w,h,p0,p1){
     const t=i/N;
     const x=p0.x*(1-t)+p1.x*t, y=p0.y*(1-t)+p1.y*t;
     const xi=Math.round(x), yi=Math.round(y);
-    // kleiner Radius 1 px
     let ok=false;
     for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
       const xx=xi+dx, yy=yi+dy;
@@ -450,20 +477,17 @@ function lineSupport(edgeMap,w,h,p0,p1){
   }
   return hit/Math.max(1,tot);
 }
-
-/* Score eines Rechtecks (im Downscale-Space) */
 function scoreQuad(q, edgeMap, w, h){
-  if (!q) return {ok:false, score:0};
-  // Geometrie
+  if (!q) return {ok:false, score:0, meta:{}};
   const wTop=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y), wBot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
   const hL=Math.hypot(q[3].x-q[0].x,q[3].y-q[0].y), hR=Math.hypot(q[2].x-q[1].x,q[2].y-q[1].y);
   const wA=(wTop+wBot)/2, hA=(hL+hR)/2, asp=wA/Math.max(1,hA);
   const areaPoly=Math.abs( (q[0].x*q[1].y - q[1].x*q[0].y) + (q[1].x*q[2].y - q[2].x*q[1].y) + (q[2].x*q[3].y - q[3].x*q[2].y) + (q[3].x*q[0].y - q[0].x*q[3].y) )/2;
   const areaFrac=areaPoly/(w*h);
-  if (areaFrac < DETECT.areaMin || areaFrac > DETECT.areaMax) return {ok:false, score:0};
-  if (asp<0.60 || asp>2.20) return {ok:false, score:0};
+  if (areaFrac < DETECT.areaMin || areaFrac > DETECT.areaMax) return {ok:false, score:0, meta:{}};
+  if (asp<0.55 || asp>2.20) return {ok:false, score:0, meta:{}};
 
-  const mB = 0.01; // 1% Touch
+  const mB = 0.01;
   const minX=Math.min(q[0].x,q[1].x,q[2].x,q[3].x), maxX=Math.max(q[0].x,q[1].x,q[2].x,q[3].x);
   const minY=Math.min(q[0].y,q[1].y,q[2].y,q[3].y), maxY=Math.max(q[0].y,q[1].y,q[2].y,q[3].y);
   let touch=0;
@@ -471,15 +495,13 @@ function scoreQuad(q, edgeMap, w, h){
   if (minY <= h*mB) touch++;
   if (maxX >= w*(1-mB)) touch++;
   if (maxY >= h*(1-mB)) touch++;
-  if (touch>=3) return {ok:false, score:0};
+  if (touch>=3) return {ok:false, score:0, meta:{}};
 
-  // rechte Winkel
   const a0=angleBetween(q[1].x-q[0].x,q[1].y-q[0].y, q[3].x-q[0].x,q[3].y-q[0].y);
   const a1=angleBetween(q[2].x-q[1].x,q[2].y-q[1].y, q[0].x-q[1].x,q[0].y-q[1].y);
   const d0=Math.abs(a0*180/Math.PI-90), d1=Math.abs(a1*180/Math.PI-90);
   const rightness = 1 - clamp((d0+d1)/60, 0, 1);
 
-  // Kanten-Support
   const s01=lineSupport(edgeMap,w,h,q[0],q[1]);
   const s12=lineSupport(edgeMap,w,h,q[1],q[2]);
   const s23=lineSupport(edgeMap,w,h,q[2],q[3]);
@@ -492,10 +514,41 @@ function scoreQuad(q, edgeMap, w, h){
   return {ok, score, meta:{areaFrac,align,rightness,asp}};
 }
 
-/* Haupt-Erkennung (Mehrskalig, Hough-Quadrilateral) */
-function detectBoardQuadOverlayJS(frameCanvas){
+/* ===== Edge-Snapping (lokale Optimierung um vorheriges Quad) ===== */
+function edgeSnapQuad(q, edgeMap, w, h){
+  if (!q) return q;
+  const shortSide = Math.min(
+    Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y),
+    Math.hypot(q[2].x-q[1].x,q[2].y-q[1].y),
+    Math.hypot(q[3].x-q[2].x,q[3].y-q[2].y),
+    Math.hypot(q[0].x-q[3].x,q[0].y-q[3].y)
+  );
+  const radius = Math.max(1, Math.round(shortSide*DETECT.snapRel));
+  const steps = DETECT.snapSteps;
+  const refineEdge=(p0,p1)=>{
+    const dx=p1.x-p0.x, dy=p1.y-p0.y;
+    const len=Math.hypot(dx,dy)||1;
+    const nx=-(dy/len), ny=(dx/len); // Normal nach links
+    let bestT=0, bestScore=-1;
+    for(let s=-steps;s<=steps;s++){
+      const t = (s/steps)*radius;
+      const a={x:p0.x+nx*t, y:p0.y+ny*t}, b={x:p1.x+nx*t, y:p1.y+ny*t};
+      const sup=lineSupport(edgeMap,w,h,a,b);
+      if (sup>bestScore){ bestScore=sup; bestT=t; }
+    }
+    return {p0:{x:p0.x+nx*bestT,y:p0.y+ny*bestT}, p1:{x:p1.x+nx*bestT,y:p1.y+ny*bestT}};
+  };
+  const e01=refineEdge(q[0],q[1]);
+  const e12=refineEdge(q[1],q[2]);
+  const e23=refineEdge(q[2],q[3]);
+  const e30=refineEdge(q[3],q[0]);
+  return orderTLTRBRBL([e01.p0, e01.p1, e23.p0, e23.p1]);
+}
+
+/* ===== Haupt-Erkennung (Mehrskalig, Hough-Quadrilateral, prior-gated) ===== */
+function detectBoardQuadOverlayJS(frameCanvas, priorAngles=null){
   const scales=[DETECT.scale1, DETECT.scale2];
-  let best=null, bestScore=-1, bestScale={sx:1,sy:1};
+  let best=null, bestScore=-1, bestScale={sx:1,sy:1}, bestMeta=null;
 
   for (const sc of scales){
     const w=Math.max(160, Math.round(frameCanvas.width*sc));
@@ -506,32 +559,39 @@ function detectBoardQuadOverlayJS(frameCanvas){
     const {edgeMap, edges} = hysteresis(nms,tw,th,DETECT.cannyK,DETECT.cannyLowRel,DETECT.borderPct);
     if (edges.length < (tw*th*0.004)) continue;
 
-    const lines = houghLines(edges, tw, th, DETECT.thetaBins);
+    // Winkel-Gate um priorAngles (falls vorhanden) -> stabiler
+    let gate=null;
+    if (priorAngles){
+      const wAng = (DETECT.angleTolDeg*Math.PI/180)*1.2; // etwas weiter
+      gate = [{center:priorAngles[0], width:wAng},{center:priorAngles[1], width:wAng}];
+    }
+
+    const lines = houghLines(edges, tw, th, DETECT.thetaBins, gate);
     if (lines.length < 4) continue;
     const groups = linesToGroups(lines);
     if (!groups) continue;
 
-    // 4 Linien: A0,A1 und B0,B1
     const L = [groups.A[0], groups.A[1], groups.B[0], groups.B[1]];
-    // Ecken: Schnitte (A0∩B0, A1∩B0, A1∩B1, A0∩B1) -> dann ordnen
     const p0=intersectLines(L[0],L[2]), p1=intersectLines(L[1],L[2]);
     const p2=intersectLines(L[1],L[3]), p3=intersectLines(L[0],L[3]);
     if (!p0||!p1||!p2||!p3) continue;
     const quadRaw=[p0,p1,p2,p3];
-    // clip ins Bild
     const inside=quadRaw.every(p=>p.x>-5 && p.y>-5 && p.x<tw+5 && p.y<th+5);
     if (!inside) continue;
+    let quad=orderTLTRBRBL(quadRaw);
 
-    const quad=orderTLTRBRBL(quadRaw);
-    const {ok,score}=scoreQuad(quad, edgeMap, tw, th);
-    if (ok && score>bestScore){
-      bestScore=score; best=quad; bestScale={sx:frameCanvas.width/tw, sy:frameCanvas.height/th};
+    // Lokales Snapping (feinjustieren)
+    quad = edgeSnapQuad(quad, edgeMap, tw, th);
+
+    const s = scoreQuad(quad, edgeMap, tw, th);
+    if (s.ok && s.score>bestScore){
+      bestScore=s.score; best=quad; bestScale={sx:frameCanvas.width/tw, sy:frameCanvas.height/th}; bestMeta=s.meta;
     }
   }
 
   if (!best) return null;
-  // Hochskalieren in Overlay-Koordinaten
-  return best.map(p=>({x:p.x*bestScale.sx, y:p.y*bestScale.sy}));
+  const scaled = best.map(p=>({x:p.x*bestScale.sx, y:p.y*bestScale.sy}));
+  return {quad: scaled, score: bestScore, meta: bestMeta};
 }
 
 /* ===== Overlay <-> Video mapping (object-fit: cover) ===== */
@@ -547,7 +607,7 @@ function overlayToVideoPoint(pt){
 }
 function mapQuadOverlayToVideo(q){ return q.map(p=>overlayToVideoPoint(p)); }
 
-/* ===== Homographie + Invers ===== */
+/* ===== Homographie + WebGL Warp ===== */
 function computeHomography(srcPts, dstPts){
   const A=new Array(8).fill(0).map(()=>new Float64Array(8));
   const b=new Float64Array(8);
@@ -593,8 +653,6 @@ function mat3Inv(m){
   for(let r=0;r<3;r++) for(let s=0;s<3;s++) inv[r][s]/=det;
   return inv;
 }
-
-/* ===== WebGL Warp (projective) ===== */
 function warpBoardWebGL(srcCanvas, srcQuad, outW, outH){
   const glCanvas=document.createElement('canvas'); glCanvas.width=outW; glCanvas.height=outH;
   const gl=glCanvas.getContext('webgl',{preserveDrawingBuffer:true});
@@ -670,10 +728,10 @@ function triArea(a,b,c){ return Math.abs((a.x*(b.y-c.y)+b.x*(c.y-a.y)+c.x*(a.y-b
 function polyArea(q){ return triArea(q[0],q[1],q[2])+triArea(q[0],q[2],q[3]); }
 function pointInQuad(p,q){ const A=polyArea(q); const s=triArea(p,q[0],q[1])+triArea(p,q[1],q[2])+triArea(p,q[2],q[3])+triArea(p,q[3],q[0]); return Math.abs(s-A)<1e-1*A; }
 async function faceBlockVerdict(canvasOverlay){
-  if (!tglFace.checked || !boardQuadOverlay) return false;
+  if (!tglFace.checked || !lockState.locked) return false;
   try{ const ok=await ensureFace(); if(!ok) return false;
     const preds=await faceModel.estimateFaces(canvasOverlay,false); if(!preds?.length) return false;
-    for (const p of preds){ if(!p.topLeft||!p.bottomRight) continue; const cx=(p.topLeft[0]+p.bottomRight[0])/2, cy=(p.topLeft[1]+p.bottomRight[1])/2; if (pointInQuad({x:cx,y:cy}, boardQuadOverlay)) return true; }
+    for (const p of preds){ if(!p.topLeft||!p.bottomRight) continue; const cx=(p.topLeft[0]+p.bottomRight[0])/2, cy=(p.topLeft[1]+p.bottomRight[1])/2; if (pointInQuad({x:cx,y:cy}, lockState.quad)) return true; }
   }catch(e){}
   return false;
 }
@@ -790,7 +848,7 @@ async function applyQualityPreset(q){
 on(selQuality,'change',async()=>{ if (selQuality.value==='auto') await setMaxResolution(); else await applyQualityPreset(selQuality.value); });
 on(selCam,'change',()=>startCamera(selCam.value));
 
-/* ===== Live Loop ===== */
+/* ===== Live Loop (mit Lock/Hysterese) ===== */
 function drawOverlayQuad(q){
   const ow=overlay.width, oh=overlay.height;
   ctxOv.clearRect(0,0,ow,oh);
@@ -798,13 +856,13 @@ function drawOverlayQuad(q){
   ctxOv.lineWidth=3.5; ctxOv.strokeStyle='rgba(78,161,255,1.0)'; ctxOv.fillStyle='rgba(78,161,255,0.15)';
   ctxOv.beginPath(); ctxOv.moveTo(q[0].x,q[0].y); for(let i=1;i<4;i++) ctxOv.lineTo(q[i].x,q[i].y); ctxOv.closePath(); ctxOv.stroke(); ctxOv.fill();
 }
-function smoothQuad(prev,cur,alpha=0.35){
+function emwaQuad(prev,cur,alpha=0.35){
   if (!prev) return cur;
   return cur.map((p,i)=>({x:lerp(prev[i].x,p.x,alpha), y:lerp(prev[i].y,p.y,alpha)}));
 }
 async function processingLoop(){
   let frameIdx=0, lastMotion=null; const MOTION_T=0.18, MOTION_FRAC=0.035;
-  let smoothed=null;
+  let prevGray=null;
 
   const step = async ()=>{
     if (!mediaStream){ loopRunning=false; return; }
@@ -812,36 +870,93 @@ async function processingLoop(){
     if (ow>2 && oh>2){
       const frameOverlay=frameCanvasOverlay();
       try{
-        if (!boardFound || (frameIdx%5===0)){ // etwas häufiger prüfen
-          const q=detectBoardQuadOverlayJS(frameOverlay);
-          if (q){
-            // Zielgröße
-            const wTop=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y);
-            const wBot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
-            const hL=Math.hypot(q[3].x-q[0].x,q[3].y-q[0].y);
-            const hR=Math.hypot(q[2].x-q[1].x,q[2].y-q[1].y);
-            const wA=(wTop+wBot)/2, hA=(hL+hR)/2, asp=wA/Math.max(1,hA);
-            targetW=1600; targetH=Math.round(targetW/asp);
-            boardQuadOverlay = q;
-            boardQuadVideo = mapQuadOverlayToVideo(q);
-            boardFound = true;
+        // Prior-Winkel aus Lock
+        const prior = lockState.locked && lockState.angles ? lockState.angles : null;
+
+        // Erkennung
+        const det = (frameIdx%4===0) ? detectBoardQuadOverlayJS(frameOverlay, prior) : null;
+
+        if (det){
+          // Update Zielgröße
+          const q=det.quad;
+          const wTop=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y);
+          const wBot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
+          const hL=Math.hypot(q[3].x-q[0].x,q[3].y-q[0].y);
+          const hR=Math.hypot(q[2].x-q[1].x,q[2].y-q[1].y);
+          const wA=(wTop+wBot)/2, hA=(hL+hR)/2, asp=wA/Math.max(1,hA);
+          targetW=1600; targetH=Math.round(targetW/asp);
+
+          // Lock/Hysterese
+          lockState.score = det.score;
+          if (!lockState.locked){
+            if (det.score >= DETECT.acquireHigh){
+              lockState.hit++;
+              if (lockState.hit >= DETECT.acquireFrames){
+                lockState.locked = true; lockState.quad = det.quad; lockState.miss=0;
+                lockState.angles = quadAngles(det.quad);
+              }
+            } else {
+              lockState.hit = 0;
+            }
           } else {
-            boardFound=false; boardQuadOverlay=null; boardQuadVideo=null;
+            // Wenn locked, halten solange Score nicht sehr schlecht ist
+            if (det.score >= DETECT.keepLow){
+              lockState.quad = det.quad; lockState.miss = 0;
+              lockState.angles = quadAngles(det.quad);
+            } else {
+              // schwacher Frame zählt als "potenzieller Miss"
+              lockState.miss++;
+            }
           }
+        } else if (lockState.locked){
+          // Kein Detekt-Ergebnis -> versuche Edge-Snapping um das vorige Quad (Overlay Downscale)
+          const sc=0.40, w=Math.max(180, Math.round(frameOverlay.width*sc)), h=Math.max(100, Math.round(frameOverlay.height*sc));
+          const {g, w:tw, h:th} = grayFromCanvas(frameOverlay, w, h);
+          const {mag,ang} = sobel(g,tw,th);
+          const nms = nonMaxSuppression(mag,ang,tw,th);
+          const {edgeMap} = hysteresis(nms,tw,th,DETECT.cannyK,DETECT.cannyLowRel,DETECT.borderPct);
+          // Voriges Quad in Downscale mappen
+          const ds=(p)=>({x:p.x*(tw/frameOverlay.width), y:p.y*(th/frameOverlay.height)});
+          const qPrev = lockState.quad.map(ds);
+          const qSnap = edgeSnapQuad(orderTLTRBRBL(qPrev), edgeMap, tw, th);
+          // zurück skalieren
+          const us=(p)=>({x:p.x*(frameOverlay.width/tw), y:p.y*(frameOverlay.height/th)});
+          const qNew = qSnap.map(us);
+          // einfacher Support-Check
+          const sTop=lineSupport(edgeMap,tw,th, qSnap[0],qSnap[1]);
+          const sRight=lineSupport(edgeMap,tw,th, qSnap[1],qSnap[2]);
+          const sBot=lineSupport(edgeMap,tw,th, qSnap[2],qSnap[3]);
+          const sLeft=lineSupport(edgeMap,tw,th, qSnap[3],qSnap[0]);
+          const avg=(sTop+sRight+sBot+sLeft)/4;
+          if (avg >= (DETECT.alignMin*0.85)){ // etwas toleranter
+            lockState.quad = qNew; lockState.miss = Math.max(0, lockState.miss-1);
+          } else {
+            lockState.miss++;
+          }
+        } else {
+          // nicht gelockt und kein Detekt: reset hit
+          lockState.hit = 0;
         }
 
-        smoothed = boardFound ? smoothQuad(smoothed, boardQuadOverlay, 0.35) : null;
-        drawOverlayQuad(smoothed);
-        stBoard.textContent=boardFound?'ja':'nein'; stBoard.className=boardFound?'ok':'bad';
+        // Lock verlieren?
+        if (lockState.locked && lockState.miss >= DETECT.maxMiss){
+          lockState.locked=false; lockState.hit=0; lockState.miss=0; lockState.angles=null; lockState.quad=null; lockState.smooth=null;
+        }
 
-        if (boardFound){
-          const warpedForDiff = frameOverlay;
-          const thumb=grayFromCanvas(warpedForDiff,128,72);
-          const diffVal=prevThumb?mse({data:thumb.g},prevThumb):null; prevThumb={data:thumb.g};
-          if (!lastMotion){ const t=grayFromCanvas(warpedForDiff,128,72); lastMotion={data:t.g}; }
-          const cur=grayFromCanvas(warpedForDiff,128,72);
-          let ch=0; for(let i=0;i<cur.g.length;i++) if (Math.abs(cur.g[i]-lastMotion.data[i])>MOTION_T) ch++;
-          const frac=ch/cur.g.length, motionBlock=frac>MOTION_FRAC; lastMotion={data:cur.g};
+        // Smooth + Draw
+        lockState.smooth = lockState.locked && lockState.quad ? emwaQuad(lockState.smooth, lockState.quad, 0.35) : null;
+        drawOverlayQuad(lockState.smooth);
+        stBoard.textContent=lockState.locked?'ja':'nein'; stBoard.className=lockState.locked?'ok':'bad';
+
+        // Change/Auto (nur wenn locked)
+        if (lockState.locked){
+          const {g:wgray} = grayFromCanvas(frameOverlay,128,72);
+          const diffVal=prevThumb?mse(wgray,prevThumb):null; prevThumb=wgray;
+
+          if (!lastMotion){ const {g:m0} = grayFromCanvas(frameOverlay,128,72); lastMotion=m0; }
+          const {g:cur} = grayFromCanvas(frameOverlay,128,72);
+          let ch=0; for(let i=0;i<cur.length;i++) if (Math.abs(cur[i]-lastMotion[i])>MOTION_T) ch++;
+          const frac=ch/cur.length, motionBlock=frac>MOTION_FRAC; lastMotion=cur.slice(0);
 
           stBlock.textContent=tglBlocker.checked?(motionBlock?'blockiert':'frei'):'aus';
           stBlock.className=tglBlocker.checked?(motionBlock?'bad':'ok'):'warn';
@@ -854,11 +969,16 @@ async function processingLoop(){
             if (cooldown && blockOk && faceOk){ await captureAndSave('Auto'); processingLoop._lastCap=performance.now(); lastChangeTs=now; }
           }
         } else {
-          smoothed=null;
+          // not locked
         }
       }catch(e){
         console.error(e);
-        boardFound=false; boardQuadOverlay=null; boardQuadVideo=null; smoothed=null; drawOverlayQuad(null);
+        // bei Fehler: nicht sofort alles verlieren
+        lockState.miss++;
+        if (lockState.miss >= DETECT.maxMiss){
+          lockState.locked=false; lockState.hit=0; lockState.miss=0; lockState.angles=null; lockState.quad=null; lockState.smooth=null;
+        }
+        drawOverlayQuad(lockState.smooth);
       }
     }
     frameIdx++; requestAnimationFrame(step);
@@ -880,8 +1000,9 @@ async function captureAndSave(prefix='Tafel'){
   try{
     let out=null;
     const frameSensor=frameCanvasSensor(); // volle Sensor-Auflösung
-    if (boardFound && boardQuadVideo){
-      const warped=warpBoardWebGL(frameSensor, boardQuadVideo, targetW, targetH);
+    if (lockState.locked && lockState.quad){
+      const quadVideo = mapQuadOverlayToVideo(lockState.quad);
+      const warped=warpBoardWebGL(frameSensor, quadVideo, targetW, targetH);
       out = warped || frameSensor;
     } else {
       out = frameSensor;

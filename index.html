@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,viewport-fit=cover,user-scalable=no" />
 <meta name="theme-color" content="#0b0e13">
-<title>TafelCapture – PureJS Hough (Stabil)</title>
+<title>TafelCapture – PureJS Hough (Stabil+ROI)</title>
 <meta name="description" content="Tafel/Whiteboard automatisch erkennen, stabil tracken und entzerrt speichern – komplett im Browser, ohne OpenCV.">
 <style>
   :root{
@@ -122,34 +122,45 @@
     <div>Board erkannt: <b id="stBoard" class="bad">nein</b></div>
     <div>Auto: <b id="stAuto" class="warn">aus</b></div>
     <div>Blocker: <b id="stBlock" class="warn">—</b></div>
-    <div>Modelle: <span id="stModels" class="mono">BoardJS(Hough+Lock), Motion</span></div>
+    <div>Modelle: <span id="stModels" class="mono">BoardJS(Hough+ROI+Lock), Motion</span></div>
   </div>
 </div>
 
 <script>
-/* ====== Konfiguration (robuste Defaults) ====== */
+/* ====== Konfiguration ====== */
 const DETECT = {
-  scale1: 0.48,      // große Stufe
-  scale2: 0.32,      // kleinere Stufe
-  borderPct: 0.03,   // Randunterdrückung (3%)
-  cannyK: 0.75,      // High-Threshold = mean + k*std
-  cannyLowRel: 0.5,  // Low = rel*High
-  thetaBins: 180,    // Hough Winkel-Bins
+  // Mehrskalige Global-Detektion
+  scale1: 0.50,
+  scale2: 0.34,
+  // Canny
+  borderPct: 0.02,
+  cannyK: 0.65,
+  cannyLowRel: 0.45,
+  // Hough
+  thetaBins: 180,
   minLinesPerGroup: 2,
-  angleTolDeg: 15,   // Orthogonalitäts-Toleranz
-  areaMin: 0.06,     // min Flächenanteil
-  areaMax: 0.80,     // max Flächenanteil (unterbindet Vollbild)
-  scoreCut: 0.58,    // minimaler Score für Kandidat
-  alignMin: 0.50,    // Minimal-Support entlang Kanten
-  rightMin: 0.48,    // Minimaler Winkel-Score
-  // Tracking/Lock:
-  acquireHigh: 0.66, // Score zum Einlocken
-  acquireFrames: 2,  // so viele gute Frames in Folge fürs Lock
-  keepLow: 0.48,     // solange Score >= keepLow bleibt, halten
-  maxMiss: 12,       // sonst erst nach N Misses lock verlieren
-  // Edge-Snapping:
-  snapRel: 0.05,     // Suchradius entlang Normalen (in % der kurzen Kante)
-  snapSteps: 9       // diskrete Offsets je Richtung
+  angleTolDeg: 20,
+  // Plausibilität
+  areaMin: 0.05,
+  areaMax: 0.88,
+  alignMin: 0.48,
+  rightMin: 0.46,
+  scoreCut: 0.55,
+  // Kontrastbewertung
+  contrastInside: 2.0, // px nach innen
+  contrastOutside: 3.0, // px nach außen
+  contrastScale: 0.12,  // Skala für Normierung
+  // Lock/Hysterese
+  acquireHigh: 0.62,
+  acquireFrames: 2,
+  keepLow: 0.44,
+  maxMiss: 24,
+  // ROI-Erkennung
+  roiPad: 0.20,   // 20% Padding um die alte Box
+  roiMax: 520,    // max ROI-Breite
+  // Edge-Snapping
+  snapRel: 0.06,
+  snapSteps: 11
 };
 
 /* ===== Short helpers ===== */
@@ -184,10 +195,10 @@ let prevThumb=null, lastChangeTs=0; const CHANGE_THRESH=0.09, STABLE_MS=800, COO
 const lockState = {
   locked: false,
   hit: 0, miss: 0,
-  quad: null,         // im Overlay-Space (aktueller „harte“ Zustand)
-  smooth: null,       // für Overlay-Zeichnung (EMWA)
+  quad: null,         // Overlay-Quad (hart, für Capture)
+  smooth: null,       // Überblendung für Overlay-Darstellung
   score: 0,
-  angles: null        // [thetaA, thetaB] aus letztem Quad
+  angles: null        // [thetaA, thetaB] der letzten Box
 };
 
 /* ===== Layout & Zoom ===== */
@@ -252,7 +263,6 @@ function frameCanvasSensor(){
 function grayFromCanvas(srcCanvas, tw, th){
   const c=document.createElement('canvas'); c.width=tw; c.height=th;
   const x=c.getContext('2d',{willReadFrequently:true});
-  // leichte Box-Blur zur Rauschreduktion
   x.filter='blur(0.3px)'; x.drawImage(srcCanvas,0,0,tw,th); x.filter='none';
   const id=x.getImageData(0,0,tw,th).data; const g=new Float32Array(tw*th);
   for(let i=0,j=0;i<id.length;i+=4,j++) g[j]=(0.299*id[i]+0.587*id[i+1]+0.114*id[i+2])/255;
@@ -320,7 +330,7 @@ function hysteresis(nms,w,h,k=DETECT.cannyK,lowRel=DETECT.cannyLowRel,borderPct=
   const edgeMap=new Uint8Array(n);
   const idx=(x,y)=>y*w+x;
   const stack=[];
-  const mB = Math.round(Math.min(w,h)*borderPct); // Rand ignorieren
+  const mB = Math.round(Math.min(w,h)*borderPct);
   for(let y=1;y<h-1;y++){
     for(let x=1;x<w-1;x++){
       if (x<mB||y<mB||x>=w-mB||y>=h-mB) continue;
@@ -349,11 +359,10 @@ function houghLines(edges,w,h,thetaBins=DETECT.thetaBins, thetaGate=null){
   const acc=new Uint32Array(thetaBins*rhoBins);
   const cos=new Float32Array(thetaBins), sin=new Float32Array(thetaBins);
   for(let t=0;t<thetaBins;t++){ const th=t*Math.PI/thetaBins; cos[t]=Math.cos(th); sin[t]=Math.sin(th); }
-  const allowTheta = (t)=>{
+  const allowTheta = (th)=>{
     if (!thetaGate) return true;
-    // gate: array of {center, width}
     for(const g of thetaGate){
-      let d=Math.abs(t-g.center); d=Math.min(d, Math.PI - d);
+      let d=Math.abs(th-g.center); d=Math.min(d, Math.PI - d);
       if (d<=g.width) return true;
     }
     return false;
@@ -373,7 +382,7 @@ function houghLines(edges,w,h,thetaBins=DETECT.thetaBins, thetaGate=null){
   for(let t=0;t<thetaBins;t++){
     for(let r=0;r<rhoBins;r++){
       const v=acc[t*rhoBins+r];
-      if (v < Math.max(15, total*0.02)) continue;
+      if (v < Math.max(12, total*0.01)) continue;
       let isMax=true;
       for(let dt=-winT;dt<=winT && isMax;dt++){
         for(let dr=-winR;dr<=winR;dr++){
@@ -477,7 +486,33 @@ function lineSupport(edgeMap,w,h,p0,p1){
   }
   return hit/Math.max(1,tot);
 }
-function scoreQuad(q, edgeMap, w, h){
+
+/* Kontrast-Score entlang der Kanten (innen vs. außen) */
+function edgeContrastScore(gray,w,h,q,insidePx=DETECT.contrastInside,outsidePx=DETECT.contrastOutside){
+  const sampleEdge=(p0,p1)=>{
+    const dx=p1.x-p0.x, dy=p1.y-p0.y, len=Math.hypot(dx,dy)||1;
+    const nx=-(dy/len), ny=(dx/len);
+    const N=Math.max(10, Math.round(len));
+    let s=0, cnt=0;
+    for(let i=0;i<=N;i++){
+      const t=i/N; const x=p0.x*(1-t)+p1.x*t, y=p0.y*(1-t)+p1.y*t;
+      const xi=Math.round(x), yi=Math.round(y);
+      const inx=Math.round(xi - nx*insidePx), iny=Math.round(yi - ny*insidePx);
+      const outx=Math.round(xi + nx*outsidePx), outy=Math.round(yi + ny*outsidePx);
+      if (inx>=1&&iny>=1&&inx<w-1&&iny<h-1 && outx>=1&&outy>=1&&outx<w-1&&outy<h-1){
+        const gi = gray[iny*w+inx], go = gray[outy*w+outx];
+        s += Math.abs(gi - go); cnt++;
+      }
+    }
+    return cnt? s/cnt : 0;
+  };
+  const c = (sampleEdge(q[0],q[1])+sampleEdge(q[1],q[2])+sampleEdge(q[2],q[3])+sampleEdge(q[3],q[0]))/4;
+  const score = clamp((c - 0.03)/DETECT.contrastScale, 0, 1); // 0.03 Baseline
+  return score;
+}
+
+/* Score eines Rechtecks */
+function scoreQuad(q, gray, edgeMap, w, h){
   if (!q) return {ok:false, score:0, meta:{}};
   const wTop=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y), wBot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
   const hL=Math.hypot(q[3].x-q[0].x,q[3].y-q[0].y), hR=Math.hypot(q[2].x-q[1].x,q[2].y-q[1].y);
@@ -485,7 +520,7 @@ function scoreQuad(q, edgeMap, w, h){
   const areaPoly=Math.abs( (q[0].x*q[1].y - q[1].x*q[0].y) + (q[1].x*q[2].y - q[2].x*q[1].y) + (q[2].x*q[3].y - q[3].x*q[2].y) + (q[3].x*q[0].y - q[0].x*q[3].y) )/2;
   const areaFrac=areaPoly/(w*h);
   if (areaFrac < DETECT.areaMin || areaFrac > DETECT.areaMax) return {ok:false, score:0, meta:{}};
-  if (asp<0.55 || asp>2.20) return {ok:false, score:0, meta:{}};
+  if (asp<0.52 || asp>2.20) return {ok:false, score:0, meta:{}};
 
   const mB = 0.01;
   const minX=Math.min(q[0].x,q[1].x,q[2].x,q[3].x), maxX=Math.max(q[0].x,q[1].x,q[2].x,q[3].x);
@@ -508,13 +543,15 @@ function scoreQuad(q, edgeMap, w, h){
   const s30=lineSupport(edgeMap,w,h,q[3],q[0]);
   const align=(s01+s12+s23+s30)/4;
 
+  const contrast = edgeContrastScore(gray,w,h,q);
   const areaCenter = 1 - Math.abs(areaFrac - 0.30)/0.30;
-  const score = clamp( 0.20*areaCenter + 0.40*align + 0.40*rightness , 0, 1);
+
+  const score = clamp( 0.20*areaCenter + 0.30*align + 0.25*rightness + 0.25*contrast , 0, 1);
   const ok = (align>=DETECT.alignMin) && (rightness>=DETECT.rightMin) && (score>=DETECT.scoreCut);
-  return {ok, score, meta:{areaFrac,align,rightness,asp}};
+  return {ok, score, meta:{areaFrac,align,rightness,contrast,asp}};
 }
 
-/* ===== Edge-Snapping (lokale Optimierung um vorheriges Quad) ===== */
+/* Edge-Snapping (lokale Optimierung) */
 function edgeSnapQuad(q, edgeMap, w, h){
   if (!q) return q;
   const shortSide = Math.min(
@@ -528,7 +565,7 @@ function edgeSnapQuad(q, edgeMap, w, h){
   const refineEdge=(p0,p1)=>{
     const dx=p1.x-p0.x, dy=p1.y-p0.y;
     const len=Math.hypot(dx,dy)||1;
-    const nx=-(dy/len), ny=(dx/len); // Normal nach links
+    const nx=-(dy/len), ny=(dx/len);
     let bestT=0, bestScore=-1;
     for(let s=-steps;s<=steps;s++){
       const t = (s/steps)*radius;
@@ -545,24 +582,24 @@ function edgeSnapQuad(q, edgeMap, w, h){
   return orderTLTRBRBL([e01.p0, e01.p1, e23.p0, e23.p1]);
 }
 
-/* ===== Haupt-Erkennung (Mehrskalig, Hough-Quadrilateral, prior-gated) ===== */
-function detectBoardQuadOverlayJS(frameCanvas, priorAngles=null){
+/* ===== Detection primitives ===== */
+function detectOnCanvas(frameCanvas, priorAngles=null){
   const scales=[DETECT.scale1, DETECT.scale2];
-  let best=null, bestScore=-1, bestScale={sx:1,sy:1}, bestMeta=null;
+  let best=null, bestScore=-1, bestScale={sx:1,sy:1};
 
   for (const sc of scales){
-    const w=Math.max(160, Math.round(frameCanvas.width*sc));
-    const h=Math.max(90, Math.round(frameCanvas.height*sc));
+    const w=Math.max(180, Math.round(frameCanvas.width*sc));
+    const h=Math.max(100, Math.round(frameCanvas.height*sc));
     const {g, w:tw, h:th} = grayFromCanvas(frameCanvas, w, h);
     const {mag,ang} = sobel(g,tw,th);
     const nms = nonMaxSuppression(mag,ang,tw,th);
     const {edgeMap, edges} = hysteresis(nms,tw,th,DETECT.cannyK,DETECT.cannyLowRel,DETECT.borderPct);
-    if (edges.length < (tw*th*0.004)) continue;
+    if (edges.length < (tw*th*0.0035)) continue;
 
-    // Winkel-Gate um priorAngles (falls vorhanden) -> stabiler
+    // Winkelgate
     let gate=null;
     if (priorAngles){
-      const wAng = (DETECT.angleTolDeg*Math.PI/180)*1.2; // etwas weiter
+      const wAng = (DETECT.angleTolDeg*Math.PI/180)*1.25;
       gate = [{center:priorAngles[0], width:wAng},{center:priorAngles[1], width:wAng}];
     }
 
@@ -575,23 +612,54 @@ function detectBoardQuadOverlayJS(frameCanvas, priorAngles=null){
     const p0=intersectLines(L[0],L[2]), p1=intersectLines(L[1],L[2]);
     const p2=intersectLines(L[1],L[3]), p3=intersectLines(L[0],L[3]);
     if (!p0||!p1||!p2||!p3) continue;
-    const quadRaw=[p0,p1,p2,p3];
-    const inside=quadRaw.every(p=>p.x>-5 && p.y>-5 && p.x<tw+5 && p.y<th+5);
-    if (!inside) continue;
-    let quad=orderTLTRBRBL(quadRaw);
-
-    // Lokales Snapping (feinjustieren)
+    let quad=orderTLTRBRBL([p0,p1,p2,p3]);
     quad = edgeSnapQuad(quad, edgeMap, tw, th);
 
-    const s = scoreQuad(quad, edgeMap, tw, th);
+    const s = scoreQuad(quad, g, edgeMap, tw, th);
     if (s.ok && s.score>bestScore){
-      bestScore=s.score; best=quad; bestScale={sx:frameCanvas.width/tw, sy:frameCanvas.height/th}; bestMeta=s.meta;
+      bestScore=s.score; best=quad; bestScale={sx:frameCanvas.width/tw, sy:frameCanvas.height/th};
     }
   }
 
   if (!best) return null;
-  const scaled = best.map(p=>({x:p.x*bestScale.sx, y:p.y*bestScale.sy}));
-  return {quad: scaled, score: bestScore, meta: bestMeta};
+  return {quad: best.map(p=>({x:p.x*bestScale.sx, y:p.y*bestScale.sy})), score: bestScore};
+}
+
+/* ROI-Helfer */
+function quadBounds(q){
+  const minX=Math.min(...q.map(p=>p.x)), maxX=Math.max(...q.map(p=>p.x));
+  const minY=Math.min(...q.map(p=>p.y)), maxY=Math.max(...q.map(p=>p.y));
+  return {x:minX, y:minY, w:maxX-minX, h:maxY-minY};
+}
+function extractROI(canvas, quad, padFrac=DETECT.roiPad){
+  const b=quadBounds(quad);
+  const pad = Math.max(b.w, b.h)*padFrac;
+  const x=Math.max(0, Math.round(b.x - pad));
+  const y=Math.max(0, Math.round(b.y - pad));
+  const w=Math.min(canvas.width - x, Math.round(b.w + 2*pad));
+  const h=Math.min(canvas.height - y, Math.round(b.h + 2*pad));
+  // ggf. auf ROI-Max herunter skalieren
+  const scale = w>DETECT.roiMax ? (DETECT.roiMax / w) : 1;
+  const rw=Math.max(20, Math.round(w*scale)), rh=Math.max(20, Math.round(h*scale));
+  const roi=document.createElement('canvas'); roi.width=rw; roi.height=rh;
+  roi.getContext('2d',{willReadFrequently:true}).drawImage(canvas, x,y,w,h, 0,0,rw,rh);
+  return {roi, x, y, w, h, scale};
+}
+function mapRoiQuadToOverlay(quadRoi, roiInfo){
+  const sx = roiInfo.w/roiInfo.roi.width;
+  const sy = roiInfo.h/roiInfo.roi.height;
+  return quadRoi.map(p=>({ x: roiInfo.x + p.x*sx, y: roiInfo.y + p.y*sy }));
+}
+
+/* ===== Haupt-Erkennung (Global + ROI) ===== */
+function detectBoardGlobal(frameCanvas, priorAngles=null){
+  return detectOnCanvas(frameCanvas, priorAngles);
+}
+function detectBoardInROI(frameCanvas, overlayQuad, priorAngles=null){
+  const roiInfo = extractROI(frameCanvas, overlayQuad, DETECT.roiPad);
+  const res = detectOnCanvas(roiInfo.roi, priorAngles);
+  if (!res) return null;
+  return {quad: mapRoiQuadToOverlay(res.quad, roiInfo), score: res.score};
 }
 
 /* ===== Overlay <-> Video mapping (object-fit: cover) ===== */
@@ -681,6 +749,7 @@ function warpBoardWebGL(srcCanvas, srcQuad, outW, outH){
   const vsh=compile(gl.VERTEX_SHADER,vs), fsh=compile(gl.FRAGMENT_SHADER,fs);
   if(!vsh||!fsh) return null;
   gl.attachShader(prog,vsh); gl.attachShader(prog,fsh); gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){ console.error(gl.getProgramInfoLog(prog)); return null; }
   gl.useProgram(prog);
 
   const pos=new Float32Array([ -1,-1,  1,-1,  -1,1,  1,1 ]);
@@ -848,7 +917,7 @@ async function applyQualityPreset(q){
 on(selQuality,'change',async()=>{ if (selQuality.value==='auto') await setMaxResolution(); else await applyQualityPreset(selQuality.value); });
 on(selCam,'change',()=>startCamera(selCam.value));
 
-/* ===== Live Loop (mit Lock/Hysterese) ===== */
+/* ===== Live Loop (Global + ROI + Lock) ===== */
 function drawOverlayQuad(q){
   const ow=overlay.width, oh=overlay.height;
   ctxOv.clearRect(0,0,ow,oh);
@@ -870,14 +939,38 @@ async function processingLoop(){
     if (ow>2 && oh>2){
       const frameOverlay=frameCanvasOverlay();
       try{
-        // Prior-Winkel aus Lock
-        const prior = lockState.locked && lockState.angles ? lockState.angles : null;
+        let det=null;
 
-        // Erkennung
-        const det = (frameIdx%4===0) ? detectBoardQuadOverlayJS(frameOverlay, prior) : null;
+        if (lockState.locked){
+          // 1) ROI-Re-Detect um die alte Box (engen Winkel-Gate)
+          det = detectBoardInROI(frameOverlay, lockState.quad, lockState.angles);
+          // 2) Wenn das zu schwach ist, nur Snapping-basierter Erhalt
+          if (!det){
+            const sc=0.40, w=Math.max(180, Math.round(frameOverlay.width*sc)), h=Math.max(100, Math.round(frameOverlay.height*sc));
+            const {g, w:tw, h:th} = grayFromCanvas(frameOverlay, w, h);
+            const {mag,ang} = sobel(g,tw,th);
+            const nms = nonMaxSuppression(mag,ang,tw,th);
+            const {edgeMap} = hysteresis(nms,tw,th,DETECT.cannyK,DETECT.cannyLowRel,DETECT.borderPct);
+            const ds=(p)=>({x:p.x*(tw/frameOverlay.width), y:p.y*(th/frameOverlay.height)});
+            const qPrev = lockState.quad.map(ds);
+            const qSnap = edgeSnapQuad(orderTLTRBRBL(qPrev), edgeMap, tw, th);
+            const s = scoreQuad(qSnap, g, edgeMap, tw, th);
+            if (s.ok){
+              const us=(p)=>({x:p.x*(frameOverlay.width/tw), y:p.y*(frameOverlay.height/th)});
+              det = {quad: qSnap.map(us), score: s.score};
+            }
+          }
+          // 3) Falls schon mehrere Misses: Global-Detekt als Recovery
+          if (!det && lockState.miss>Math.floor(DETECT.maxMiss/3)){
+            det = detectBoardGlobal(frameOverlay, lockState.angles);
+          }
+        } else {
+          // Nicht gelockt -> Global Detect, leicht häufiger
+          if (frameIdx%2===0) det = detectBoardGlobal(frameOverlay, null);
+        }
 
         if (det){
-          // Update Zielgröße
+          // Zielgröße aktualisieren
           const q=det.quad;
           const wTop=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y);
           const wBot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
@@ -892,58 +985,27 @@ async function processingLoop(){
             if (det.score >= DETECT.acquireHigh){
               lockState.hit++;
               if (lockState.hit >= DETECT.acquireFrames){
-                lockState.locked = true; lockState.quad = det.quad; lockState.miss=0;
-                lockState.angles = quadAngles(det.quad);
+                lockState.locked = true; lockState.quad = det.quad; lockState.miss=0; lockState.angles=quadAngles(det.quad);
               }
-            } else {
-              lockState.hit = 0;
-            }
+            } else lockState.hit = 0;
           } else {
-            // Wenn locked, halten solange Score nicht sehr schlecht ist
             if (det.score >= DETECT.keepLow){
-              lockState.quad = det.quad; lockState.miss = 0;
-              lockState.angles = quadAngles(det.quad);
+              lockState.quad = det.quad; lockState.miss = 0; lockState.angles=quadAngles(det.quad);
             } else {
-              // schwacher Frame zählt als "potenzieller Miss"
               lockState.miss++;
             }
           }
-        } else if (lockState.locked){
-          // Kein Detekt-Ergebnis -> versuche Edge-Snapping um das vorige Quad (Overlay Downscale)
-          const sc=0.40, w=Math.max(180, Math.round(frameOverlay.width*sc)), h=Math.max(100, Math.round(frameOverlay.height*sc));
-          const {g, w:tw, h:th} = grayFromCanvas(frameOverlay, w, h);
-          const {mag,ang} = sobel(g,tw,th);
-          const nms = nonMaxSuppression(mag,ang,tw,th);
-          const {edgeMap} = hysteresis(nms,tw,th,DETECT.cannyK,DETECT.cannyLowRel,DETECT.borderPct);
-          // Voriges Quad in Downscale mappen
-          const ds=(p)=>({x:p.x*(tw/frameOverlay.width), y:p.y*(th/frameOverlay.height)});
-          const qPrev = lockState.quad.map(ds);
-          const qSnap = edgeSnapQuad(orderTLTRBRBL(qPrev), edgeMap, tw, th);
-          // zurück skalieren
-          const us=(p)=>({x:p.x*(frameOverlay.width/tw), y:p.y*(frameOverlay.height/th)});
-          const qNew = qSnap.map(us);
-          // einfacher Support-Check
-          const sTop=lineSupport(edgeMap,tw,th, qSnap[0],qSnap[1]);
-          const sRight=lineSupport(edgeMap,tw,th, qSnap[1],qSnap[2]);
-          const sBot=lineSupport(edgeMap,tw,th, qSnap[2],qSnap[3]);
-          const sLeft=lineSupport(edgeMap,tw,th, qSnap[3],qSnap[0]);
-          const avg=(sTop+sRight+sBot+sLeft)/4;
-          if (avg >= (DETECT.alignMin*0.85)){ // etwas toleranter
-            lockState.quad = qNew; lockState.miss = Math.max(0, lockState.miss-1);
-          } else {
-            lockState.miss++;
-          }
         } else {
-          // nicht gelockt und kein Detekt: reset hit
-          lockState.hit = 0;
+          if (lockState.locked) lockState.miss++;
+          else lockState.hit=0;
         }
 
-        // Lock verlieren?
+        // Lock verlieren nur bei vielen Misses
         if (lockState.locked && lockState.miss >= DETECT.maxMiss){
           lockState.locked=false; lockState.hit=0; lockState.miss=0; lockState.angles=null; lockState.quad=null; lockState.smooth=null;
         }
 
-        // Smooth + Draw
+        // Zeichnen
         lockState.smooth = lockState.locked && lockState.quad ? emwaQuad(lockState.smooth, lockState.quad, 0.35) : null;
         drawOverlayQuad(lockState.smooth);
         stBoard.textContent=lockState.locked?'ja':'nein'; stBoard.className=lockState.locked?'ok':'bad';
@@ -968,12 +1030,9 @@ async function processingLoop(){
             const faceOk=!(await faceBlockVerdict(frameOverlay));
             if (cooldown && blockOk && faceOk){ await captureAndSave('Auto'); processingLoop._lastCap=performance.now(); lastChangeTs=now; }
           }
-        } else {
-          // not locked
         }
       }catch(e){
         console.error(e);
-        // bei Fehler: nicht sofort alles verlieren
         lockState.miss++;
         if (lockState.miss >= DETECT.maxMiss){
           lockState.locked=false; lockState.hit=0; lockState.miss=0; lockState.angles=null; lockState.quad=null; lockState.smooth=null;
